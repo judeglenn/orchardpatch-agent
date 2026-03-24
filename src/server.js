@@ -137,7 +137,7 @@ app.get("/config", authMiddleware, (req, res) => {
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 
-app.listen(PORT, "127.0.0.1", () => {
+app.listen(PORT, "localhost", () => {
   console.log(`[OrchardPatch Agent] Listening on http://127.0.0.1:${PORT}`);
   console.log(`[OrchardPatch Agent] Config: ${CONFIG_PATH}`);
   // Start scheduled inventory collection
