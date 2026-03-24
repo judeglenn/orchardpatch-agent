@@ -12,6 +12,7 @@ const path = require("path");
 const { collectInventory } = require("./inventory");
 const { getJamfInventory } = require("./jamf");
 const { startScheduler, runCollection, readCache, getCacheAge } = require("./scheduler");
+const { checkLatestVersions } = require("./versions");
 
 const CACHE_MAX_AGE_MS = 15 * 60 * 1000; // serve cache if < 15 min old
 
@@ -84,14 +85,36 @@ app.get("/inventory/local", authMiddleware, async (req, res) => {
     if (!forceRefresh && cacheAge < CACHE_MAX_AGE_MS) {
       const cached = readCache();
       if (cached) {
-        return res.json({ ...cached, fromCache: true, cacheAgeMs: cacheAge });
+        const bundleIds = cached.apps.map(a => a.bundleId);
+        const latestVersions = await checkLatestVersions(bundleIds);
+        const enrichedApps = cached.apps.map(app => ({
+          ...app,
+          latestVersion: latestVersions[app.bundleId] ?? null,
+          isOutdated: latestVersions[app.bundleId]
+            ? latestVersions[app.bundleId] !== app.version
+            : false,
+        }));
+        return res.json({ ...cached, apps: enrichedApps, fromCache: true, cacheAgeMs: cacheAge });
       }
     }
 
     // Collect fresh
     const inventory = await runCollection();
     if (!inventory) throw new Error("Collection failed");
-    res.json({ ...inventory, fromCache: false });
+
+    // Enrich with latest version data
+    const bundleIds = inventory.apps.map(a => a.bundleId);
+    const latestVersions = await checkLatestVersions(bundleIds);
+
+    const enrichedApps = inventory.apps.map(app => ({
+      ...app,
+      latestVersion: latestVersions[app.bundleId] ?? null,
+      isOutdated: latestVersions[app.bundleId]
+        ? latestVersions[app.bundleId] !== app.version
+        : false,
+    }));
+
+    res.json({ ...inventory, apps: enrichedApps, fromCache: false });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
