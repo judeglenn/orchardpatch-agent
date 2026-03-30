@@ -12,7 +12,8 @@ const path = require("path");
 const { collectInventory } = require("./inventory");
 const { getJamfInventory } = require("./jamf");
 const { startScheduler, runCollection, readCache, getCacheAge } = require("./scheduler");
-const { checkLatestVersions } = require("./versions");
+const { checkLatestVersions, BUNDLE_VERSION_MAP } = require("./versions");
+const { runPatchJob, getJob, listJobs, ensureInstallomator, findInstallomator, getSudoersInstruction } = require("./patcher");
 
 const CACHE_MAX_AGE_MS = 15 * 60 * 1000; // serve cache if < 15 min old
 
@@ -156,6 +157,77 @@ app.get("/config", authMiddleware, (req, res) => {
       configured: true,
     } : null,
   });
+});
+
+// ─── Patching ────────────────────────────────────────────────────────────────
+
+// Check if patching is ready (Installomator present, sudo configured)
+app.get("/patch/status", authMiddleware, (req, res) => {
+  const installomatorPath = findInstallomator();
+  res.json({
+    ready: !!installomatorPath,
+    installomatorPath: installomatorPath || null,
+    sudoersInstruction: installomatorPath ? null : getSudoersInstruction(),
+    hint: installomatorPath
+      ? "Installomator found. Ensure sudoers is configured for passwordless sudo."
+      : "Installomator not found. Run: POST /patch/install to download it.",
+  });
+});
+
+// Download and install Installomator
+app.post("/patch/install", authMiddleware, async (req, res) => {
+  try {
+    const installomatorPath = await ensureInstallomator();
+    res.json({
+      success: true,
+      installomatorPath,
+      sudoersInstruction: getSudoersInstruction(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, sudoersInstruction: getSudoersInstruction() });
+  }
+});
+
+// Queue a patch job
+// Body: { bundleId, label, appName, mode: "silent"|"managed"|"prompted", deviceId? }
+app.post("/patch", authMiddleware, async (req, res) => {
+  const { bundleId, label, appName, mode, deviceId } = req.body || {};
+
+  if (!label || !appName) {
+    return res.status(400).json({ error: "label and appName are required" });
+  }
+
+  const validModes = ["silent", "managed", "prompted"];
+  const patchMode = validModes.includes(mode) ? mode : "managed";
+
+  console.log(`[Patch] Queuing: ${appName} (${label}) mode=${patchMode}`);
+
+  try {
+    const job = await runPatchJob(label, appName, patchMode, deviceId);
+    res.json({
+      jobId: job.id,
+      status: job.status,
+      appName: job.appName,
+      label: job.label,
+      mode: job.mode,
+      createdAt: job.createdAt,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Poll a patch job's status
+app.get("/patch/:jobId", authMiddleware, (req, res) => {
+  const job = getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  res.json(job);
+});
+
+// List recent patch jobs
+app.get("/patch", authMiddleware, (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  res.json({ jobs: listJobs().slice(0, limit) });
 });
 
 // ─── Start ───────────────────────────────────────────────────────────────────
