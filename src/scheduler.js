@@ -7,6 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const { collectInventory } = require("./inventory");
+const { checkinToServer } = require("./checkin");
 
 const CACHE_DIR = path.join(process.env.HOME || "/var/root", ".orchardpatch");
 const CACHE_FILE = path.join(CACHE_DIR, "inventory-cache.json");
@@ -48,6 +49,10 @@ async function runCollection() {
     console.log("[OrchardPatch Scheduler] Running scheduled inventory collection...");
     const inventory = collectInventory();
     writeCache(inventory);
+    // Report to central server if configured (non-blocking)
+    checkinToServer(inventory).catch(err =>
+      console.warn("[OrchardPatch Scheduler] Server check-in failed:", err.message)
+    );
     return inventory;
   } catch (err) {
     console.error("[OrchardPatch Scheduler] Collection failed:", err.message);

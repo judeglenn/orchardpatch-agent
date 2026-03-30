@@ -161,6 +161,25 @@ app.get("/inventory/jamf", authMiddleware, async (req, res) => {
   }
 });
 
+// Save central server config
+app.post("/config/server", authMiddleware, (req, res) => {
+  const { url, token } = req.body;
+  if (!url || !token) return res.status(400).json({ error: "url and token required" });
+  const config = loadConfig();
+  config.server = { url, token };
+  saveConfig(config);
+  res.json({ success: true });
+});
+
+// Get central server config status
+app.get("/config/server", authMiddleware, (req, res) => {
+  const config = loadConfig();
+  res.json({
+    configured: !!config.server?.url,
+    url: config.server?.url || null,
+  });
+});
+
 // Save Jamf config
 app.post("/config/jamf", authMiddleware, (req, res) => {
   const { serverUrl, clientId, clientSecret } = req.body;
