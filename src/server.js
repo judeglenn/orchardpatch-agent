@@ -19,6 +19,22 @@ const { getOverride, setOverride, deleteOverride, listOverrides } = require("./o
 
 const CACHE_MAX_AGE_MS = 15 * 60 * 1000; // serve cache if < 15 min old
 
+// Compare versions loosely — strips parentheses, spaces, normalizes separators
+// "7.0.0 (77593)" === "7.0.0.77593" → true
+function normalizeVersion(v) {
+  return v.replace(/[)(]/g, "").replace(/\s+/g, ".").replace(/\.+/g, ".").trim();
+}
+function versionsMatch(a, b) {
+  if (!a || !b) return false;
+  const na = normalizeVersion(a);
+  const nb = normalizeVersion(b);
+  if (na === nb) return true;
+  // Also compare just the numeric parts
+  const digitsA = na.replace(/[^0-9.]/g, "");
+  const digitsB = nb.replace(/[^0-9.]/g, "");
+  return digitsA === digitsB;
+}
+
 const app = express();
 const PORT = 47652; // OrchardPatch agent port
 // When running as LaunchDaemon (root), config lives in /etc/orchardpatch
@@ -98,7 +114,7 @@ app.get("/inventory/local", authMiddleware, async (req, res) => {
           ...app,
           latestVersion: latestVersions[app.bundleId] ?? null,
           isOutdated: latestVersions[app.bundleId]
-            ? latestVersions[app.bundleId] !== app.version
+            ? !versionsMatch(latestVersions[app.bundleId], app.version)
             : false,
         }));
         enrichedApps = enrichAppsWithLabels(enrichedApps);
@@ -118,7 +134,7 @@ app.get("/inventory/local", authMiddleware, async (req, res) => {
       ...app,
       latestVersion: latestVersions[app.bundleId] ?? null,
       isOutdated: latestVersions[app.bundleId]
-        ? latestVersions[app.bundleId] !== app.version
+        ? !versionsMatch(latestVersions[app.bundleId], app.version)
         : false,
     }));
 
