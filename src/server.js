@@ -14,7 +14,8 @@ const { getJamfInventory } = require("./jamf");
 const { startScheduler, runCollection, readCache, getCacheAge } = require("./scheduler");
 const { checkLatestVersions, BUNDLE_VERSION_MAP } = require("./versions");
 const { runPatchJob, getJob, listJobs, ensureInstallomator, findInstallomator, getSudoersInstruction } = require("./patcher");
-const { syncCatalog, enrichAppsWithLabels, getCatalog, getCatalogAge } = require("./catalog");
+const { syncCatalog, enrichAppsWithLabels, lookupLabel, getCatalog, getCatalogAge } = require("./catalog");
+const { getOverride, setOverride, deleteOverride, listOverrides } = require("./overrides");
 
 const CACHE_MAX_AGE_MS = 15 * 60 * 1000; // serve cache if < 15 min old
 
@@ -200,10 +201,24 @@ app.post("/patch/install", authMiddleware, async (req, res) => {
 // Queue a patch job
 // Body: { bundleId, label, appName, mode: "silent"|"managed"|"prompted", deviceId? }
 app.post("/patch", authMiddleware, async (req, res) => {
-  const { bundleId, label, appName, mode, deviceId } = req.body || {};
+  const { bundleId, appName, mode, deviceId } = req.body || {};
+  let { label } = req.body || {};
 
-  if (!label || !appName) {
-    return res.status(400).json({ error: "label and appName are required" });
+  if (!appName) {
+    return res.status(400).json({ error: "appName is required" });
+  }
+
+  // Resolve label: explicit > override > catalog auto-detect
+  if (!label && bundleId) {
+    label = getOverride(bundleId) || lookupLabel(appName, bundleId) || null;
+  }
+
+  if (!label) {
+    return res.status(400).json({
+      error: `No Installomator label found for "${appName}" (${bundleId || "no bundle ID"}). Add a label override in Settings.`,
+      bundleId,
+      appName,
+    });
   }
 
   const validModes = ["silent", "managed", "prompted"];
@@ -237,6 +252,42 @@ app.get("/patch/:jobId", authMiddleware, (req, res) => {
 app.get("/patch", authMiddleware, (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   res.json({ jobs: listJobs().slice(0, limit) });
+});
+
+// ─── Label Overrides ─────────────────────────────────────────────────────────
+
+// List all overrides
+app.get("/overrides", authMiddleware, (req, res) => {
+  res.json({ overrides: listOverrides() });
+});
+
+// Set an override
+app.post("/overrides", authMiddleware, (req, res) => {
+  const { bundleId, label } = req.body || {};
+  if (!bundleId || !label) {
+    return res.status(400).json({ error: "bundleId and label are required" });
+  }
+  setOverride(bundleId, label);
+  res.json({ success: true, bundleId, label });
+});
+
+// Delete an override
+app.delete("/overrides/:bundleId", authMiddleware, (req, res) => {
+  const bundleId = decodeURIComponent(req.params.bundleId);
+  deleteOverride(bundleId);
+  res.json({ success: true, bundleId });
+});
+
+// Resolve the best label for a bundle ID (override > catalog > null)
+app.get("/overrides/resolve/:bundleId", authMiddleware, (req, res) => {
+  const bundleId = decodeURIComponent(req.params.bundleId);
+  const override = getOverride(bundleId);
+  const catalogLabel = lookupLabel(null, bundleId);
+  res.json({
+    bundleId,
+    label: override || catalogLabel || null,
+    source: override ? "override" : catalogLabel ? "catalog" : "none",
+  });
 });
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
