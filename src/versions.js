@@ -123,7 +123,8 @@ async function fetchJSON(url, key, transform) {
 }
 
 /**
- * Follow redirects and extract version from URL path segment
+ * Follow redirects and extract version from URL path segment,
+ * then clean it up to just the version number
  */
 async function fetchHeaderVersion(url, segmentIndex) {
   try {
@@ -134,7 +135,11 @@ async function fetchHeaderVersion(url, segmentIndex) {
     });
     const location = res.headers.get("location") || "";
     const segments = location.split("/");
-    return segments[segmentIndex] ?? null;
+    const raw = segments[segmentIndex] ?? null;
+    if (!raw) return null;
+    // Extract semver-like version from filenames like "Slack-4.48.102-macOS.dmg" or "6.7.7.76486"
+    const match = raw.match(/(\d+\.\d+[\.\d]*)/);
+    return match ? match[1] : raw;
   } catch {
     return null;
   }
