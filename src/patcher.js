@@ -10,8 +10,7 @@
  * The patcher checks for this and will report a clear error if not configured.
  */
 
-const { spawn } = require("child_process");
-const { execSync } = require("child_process");
+const { spawn, execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -237,13 +236,22 @@ async function _executePatch(job, modeFlags) {
       data.toString().split("\n").filter(Boolean).forEach((line) => logLine(`STDERR: ${line}`));
     });
 
-    proc.on("close", (code) => {
+    proc.on("close", async (code) => {
       job.exitCode = code;
       job.completedAt = new Date().toISOString();
 
       if (code === 0) {
         job.status = "success";
         job.log.push(`[INFO] Patch completed successfully (exit 0)`);
+        // Trigger fresh inventory so UI reflects updated version immediately
+        try {
+          const { runCollection } = require("./scheduler");
+          await runCollection();
+          job.log.push(`[INFO] Inventory refreshed post-patch`);
+          console.log("[Patcher] Post-patch inventory refresh complete");
+        } catch (e) {
+          job.log.push(`[WARN] Post-patch inventory refresh failed: ${e.message}`);
+        }
       } else {
         job.status = "failed";
         job.error = `Installomator exited with code ${code}`;
