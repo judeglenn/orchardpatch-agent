@@ -1,0 +1,82 @@
+#!/bin/bash
+# OrchardPatch Agent — postinstall
+# Runs as root via the installer. Sets up the agent as a LaunchDaemon.
+
+set -e
+
+AGENT_DIR="/usr/local/orchardpatch/agent"
+LOG_DIR="/var/log/orchardpatch"
+CONFIG_DIR="/etc/orchardpatch"
+LAUNCHDAEMON_PLIST="/Library/LaunchDaemons/com.orchardpatch.agent.plist"
+INSTALLOMATOR_PATH="/usr/local/bin/Installomator.sh"
+INSTALLOMATOR_URL="https://raw.githubusercontent.com/Installomator/Installomator/main/Installomator.sh"
+
+echo "[OrchardPatch] Starting postinstall..."
+
+# ── 1. Create directories ────────────────────────────────────────────────────
+mkdir -p "$LOG_DIR"
+mkdir -p "$CONFIG_DIR"
+chmod 755 "$LOG_DIR"
+chmod 700 "$CONFIG_DIR"
+
+# ── 2. Install Installomator if not present ──────────────────────────────────
+if [ ! -f "$INSTALLOMATOR_PATH" ]; then
+    echo "[OrchardPatch] Downloading Installomator..."
+    curl -fsSL "$INSTALLOMATOR_URL" -o "$INSTALLOMATOR_PATH" || {
+        echo "[OrchardPatch] WARNING: Could not download Installomator. Patching will be unavailable until it is installed."
+    }
+    if [ -f "$INSTALLOMATOR_PATH" ]; then
+        chmod +x "$INSTALLOMATOR_PATH"
+        echo "[OrchardPatch] Installomator installed at $INSTALLOMATOR_PATH"
+    fi
+else
+    echo "[OrchardPatch] Installomator already present at $INSTALLOMATOR_PATH"
+fi
+
+# ── 3. Set permissions on agent directory ────────────────────────────────────
+chmod -R 755 "$AGENT_DIR"
+chown -R root:wheel "$AGENT_DIR"
+
+# Create the run script
+cat > "$AGENT_DIR/run.sh" << 'EOF'
+#!/bin/bash
+cd /usr/local/orchardpatch/agent
+exec /usr/local/bin/node src/server.js
+EOF
+chmod +x "$AGENT_DIR/run.sh"
+
+# ── 4. Install LaunchDaemon ──────────────────────────────────────────────────
+echo "[OrchardPatch] Installing LaunchDaemon..."
+
+# Unload if already loaded (upgrade scenario)
+if launchctl list | grep -q "com.orchardpatch.agent"; then
+    echo "[OrchardPatch] Unloading existing LaunchDaemon..."
+    launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+fi
+
+# Copy plist
+cp "$AGENT_DIR/pkg/LaunchDaemons/com.orchardpatch.agent.plist" "$LAUNCHDAEMON_PLIST"
+chmod 644 "$LAUNCHDAEMON_PLIST"
+chown root:wheel "$LAUNCHDAEMON_PLIST"
+
+# Load the daemon
+launchctl load "$LAUNCHDAEMON_PLIST"
+echo "[OrchardPatch] LaunchDaemon loaded — agent will start now and on every boot"
+
+# ── 5. Wait for agent to start and verify ────────────────────────────────────
+echo "[OrchardPatch] Waiting for agent to start..."
+for i in {1..10}; do
+    sleep 1
+    if curl -sf http://127.0.0.1:47652/health > /dev/null 2>&1; then
+        echo "[OrchardPatch] ✅ Agent is running at http://127.0.0.1:47652"
+        break
+    fi
+    if [ $i -eq 10 ]; then
+        echo "[OrchardPatch] WARNING: Agent did not start within 10s. Check logs at $LOG_DIR"
+    fi
+done
+
+echo "[OrchardPatch] Installation complete."
+echo "[OrchardPatch] Logs: $LOG_DIR/agent.log"
+echo "[OrchardPatch] Config: $CONFIG_DIR/config.json"
+exit 0

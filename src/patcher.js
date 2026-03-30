@@ -195,20 +195,30 @@ async function _executePatch(job, modeFlags) {
 
   job.log.push(`[INFO] Using Installomator at: ${installomatorPath}`);
 
-  // Build the command args
-  const args = [
-    installomatorPath,
-    job.label,
-    `NOTIFY=${modeFlags.NOTIFY}`,
-    `BLOCKING_PROCESS_ACTION=${modeFlags.BLOCKING_PROCESS_ACTION}`,
-    `LOGGING=${modeFlags.LOGGING}`,
-    "DEBUG=0",
-  ];
+  // Check if running as root (LaunchDaemon) or fall back to sudo (dev mode)
+  const isRoot = process.getuid && process.getuid() === 0;
+  const cmd = isRoot ? installomatorPath : "sudo";
+  const args = isRoot
+    ? [
+        job.label,
+        `NOTIFY=${modeFlags.NOTIFY}`,
+        `BLOCKING_PROCESS_ACTION=${modeFlags.BLOCKING_PROCESS_ACTION}`,
+        `LOGGING=${modeFlags.LOGGING}`,
+        "DEBUG=0",
+      ]
+    : [
+        installomatorPath,
+        job.label,
+        `NOTIFY=${modeFlags.NOTIFY}`,
+        `BLOCKING_PROCESS_ACTION=${modeFlags.BLOCKING_PROCESS_ACTION}`,
+        `LOGGING=${modeFlags.LOGGING}`,
+        "DEBUG=0",
+      ];
 
-  job.log.push(`[INFO] Running: sudo ${args.join(" ")}`);
+  job.log.push(`[INFO] Running${isRoot ? " (root)" : " (sudo)"}: ${cmd} ${args.join(" ")}`);
 
   return new Promise((resolve) => {
-    const proc = spawn("sudo", args, {
+    const proc = spawn(cmd, args, {
       env: { ...process.env, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" },
     });
 

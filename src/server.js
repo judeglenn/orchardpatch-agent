@@ -19,7 +19,11 @@ const CACHE_MAX_AGE_MS = 15 * 60 * 1000; // serve cache if < 15 min old
 
 const app = express();
 const PORT = 47652; // OrchardPatch agent port
-const CONFIG_PATH = path.join(process.env.HOME || "/var/root", ".orchardpatch", "config.json");
+// When running as LaunchDaemon (root), config lives in /etc/orchardpatch
+// When running as user (dev), falls back to ~/.orchardpatch
+const CONFIG_PATH = process.getuid && process.getuid() === 0
+  ? "/etc/orchardpatch/config.json"
+  : path.join(process.env.HOME || "/var/root", ".orchardpatch", "config.json");
 
 // Security — only allow requests from localhost
 app.use(cors({ origin: ["http://localhost:3000", "https://orchardpatch.vercel.app", /\.orchardpatch\.com$/] }));

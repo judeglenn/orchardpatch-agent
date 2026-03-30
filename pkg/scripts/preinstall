@@ -1,0 +1,16 @@
+#!/bin/bash
+# OrchardPatch Agent — preinstall
+# Gracefully stops the running agent before upgrade
+
+LAUNCHDAEMON_PLIST="/Library/LaunchDaemons/com.orchardpatch.agent.plist"
+
+echo "[OrchardPatch] Preparing for installation..."
+
+# Stop the agent if running (upgrade scenario)
+if launchctl list | grep -q "com.orchardpatch.agent"; then
+    echo "[OrchardPatch] Stopping existing agent..."
+    launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+    sleep 1
+fi
+
+exit 0
