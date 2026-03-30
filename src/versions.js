@@ -135,11 +135,27 @@ async function fetchHeaderVersion(url, segmentIndex) {
     });
     const location = res.headers.get("location") || "";
     const segments = location.split("/");
-    const raw = segments[segmentIndex] ?? null;
-    if (!raw) return null;
-    // Extract semver-like version from filenames like "Slack-4.48.102-macOS.dmg" or "6.7.7.76486"
-    const match = raw.match(/(\d+\.\d+[\.\d]*)/);
-    return match ? match[1] : raw;
+
+    // First try the hinted segment index
+    const hinted = segments[segmentIndex] ?? null;
+    if (hinted) {
+      const m = hinted.match(/(\d+\.\d+[\.\d]*)/);
+      if (m) return m[1];
+    }
+
+    // Scan ALL segments for a version-like string (e.g. "7.0.0.77593", "4.48.102")
+    for (const seg of segments) {
+      const m = seg.match(/^(\d+\.\d+[\.\d]*)$/);
+      if (m) return m[1];
+    }
+
+    // Last resort: extract version from any segment containing digits and dots
+    for (const seg of segments) {
+      const m = seg.match(/(\d+\.\d+\.\d+[\.\d]*)/);
+      if (m) return m[1];
+    }
+
+    return null;
   } catch {
     return null;
   }
