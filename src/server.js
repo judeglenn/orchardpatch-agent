@@ -14,6 +14,7 @@ const { getJamfInventory } = require("./jamf");
 const { startScheduler, runCollection, readCache, getCacheAge } = require("./scheduler");
 const { checkLatestVersions, BUNDLE_VERSION_MAP } = require("./versions");
 const { runPatchJob, getJob, listJobs, ensureInstallomator, findInstallomator, getSudoersInstruction } = require("./patcher");
+const { syncCatalog, enrichAppsWithLabels, getCatalog, getCatalogAge } = require("./catalog");
 
 const CACHE_MAX_AGE_MS = 15 * 60 * 1000; // serve cache if < 15 min old
 
@@ -92,13 +93,14 @@ app.get("/inventory/local", authMiddleware, async (req, res) => {
       if (cached) {
         const bundleIds = cached.apps.map(a => a.bundleId);
         const latestVersions = await checkLatestVersions(bundleIds);
-        const enrichedApps = cached.apps.map(app => ({
+        let enrichedApps = cached.apps.map(app => ({
           ...app,
           latestVersion: latestVersions[app.bundleId] ?? null,
           isOutdated: latestVersions[app.bundleId]
             ? latestVersions[app.bundleId] !== app.version
             : false,
         }));
+        enrichedApps = enrichAppsWithLabels(enrichedApps);
         return res.json({ ...cached, apps: enrichedApps, fromCache: true, cacheAgeMs: cacheAge });
       }
     }
@@ -111,13 +113,16 @@ app.get("/inventory/local", authMiddleware, async (req, res) => {
     const bundleIds = inventory.apps.map(a => a.bundleId);
     const latestVersions = await checkLatestVersions(bundleIds);
 
-    const enrichedApps = inventory.apps.map(app => ({
+    let enrichedApps = inventory.apps.map(app => ({
       ...app,
       latestVersion: latestVersions[app.bundleId] ?? null,
       isOutdated: latestVersions[app.bundleId]
         ? latestVersions[app.bundleId] !== app.version
         : false,
     }));
+
+    // Enrich with Installomator labels from catalog
+    enrichedApps = enrichAppsWithLabels(enrichedApps);
 
     res.json({ ...inventory, apps: enrichedApps, fromCache: false });
   } catch (err) {
@@ -232,6 +237,32 @@ app.get("/patch/:jobId", authMiddleware, (req, res) => {
 app.get("/patch", authMiddleware, (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   res.json({ jobs: listJobs().slice(0, limit) });
+});
+
+// ─── Catalog ─────────────────────────────────────────────────────────────────
+
+// Get catalog status
+app.get("/catalog/status", authMiddleware, (req, res) => {
+  const cat = getCatalog();
+  const age = getCatalogAge();
+  res.json({
+    synced: !!cat.syncedAt,
+    syncedAt: cat.syncedAt,
+    ageHours: age === Infinity ? null : Math.round(age / 3600000),
+    labelCount: cat.labelList.length,
+    nameCount: Object.keys(cat.byName).length,
+    bundleIdCount: Object.keys(cat.byBundleId).length,
+  });
+});
+
+// Force catalog resync
+app.post("/catalog/sync", authMiddleware, async (req, res) => {
+  try {
+    res.json({ started: true, message: "Catalog sync started in background" });
+    await syncCatalog(true);
+  } catch (err) {
+    console.error("[Catalog] Manual sync failed:", err.message);
+  }
 });
 
 // ─── Start ───────────────────────────────────────────────────────────────────
