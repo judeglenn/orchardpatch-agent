@@ -33,11 +33,15 @@ fi
 chmod -R 755 "$AGENT_DIR"
 chown -R root:wheel "$AGENT_DIR"
 
+# Auto-detect node path (handles Homebrew on Apple Silicon vs Intel)
+NODE_BIN=$(which node 2>/dev/null || echo "/usr/local/bin/node")
+echo "[OrchardPatch] Using node at: $NODE_BIN"
+
 # Create the run script
-cat > "$AGENT_DIR/run.sh" << 'EOF'
+cat > "$AGENT_DIR/run.sh" << EOF
 #!/bin/bash
 cd /usr/local/orchardpatch/agent
-exec /usr/local/bin/node src/server.js
+exec $NODE_BIN src/server.js
 EOF
 chmod +x "$AGENT_DIR/run.sh"
 
