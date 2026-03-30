@@ -123,6 +123,42 @@ async function ensureInstallomator() {
   return installomatorPath;
 }
 
+// ─── Persistence ─────────────────────────────────────────────────────────────
+
+const HISTORY_DIR = process.getuid && process.getuid() === 0
+  ? "/etc/orchardpatch"
+  : path.join(os.homedir(), ".orchardpatch");
+const HISTORY_FILE = path.join(HISTORY_DIR, "patch-history.json");
+const MAX_HISTORY = 500; // keep last 500 jobs
+
+function loadHistory() {
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      const data = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8"));
+      if (Array.isArray(data)) {
+        data.forEach(job => jobs.set(job.id, job));
+        jobCounter = data.length;
+        console.log(`[Patcher] Loaded ${data.length} jobs from history`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[Patcher] Could not load history: ${err.message}`);
+  }
+}
+
+function saveHistory() {
+  try {
+    if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    const all = listJobs().slice(0, MAX_HISTORY);
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(all, null, 2));
+  } catch (err) {
+    console.warn(`[Patcher] Could not save history: ${err.message}`);
+  }
+}
+
+// Load history on module init
+loadHistory();
+
 // ─── Job management ──────────────────────────────────────────────────────────
 
 function createJob(label, appName, mode, deviceId) {
@@ -142,6 +178,7 @@ function createJob(label, appName, mode, deviceId) {
     error: null,
   };
   jobs.set(id, job);
+  saveHistory();
   return job;
 }
 
@@ -258,6 +295,7 @@ async function _executePatch(job, modeFlags) {
         job.log.push(`[ERROR] Patch failed (exit ${code})`);
       }
 
+      saveHistory();
       resolve();
     });
 
@@ -271,6 +309,7 @@ async function _executePatch(job, modeFlags) {
         );
       }
       job.completedAt = new Date().toISOString();
+      saveHistory();
       resolve();
     });
   });
