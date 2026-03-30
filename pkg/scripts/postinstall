@@ -2,8 +2,6 @@
 # OrchardPatch Agent — postinstall
 # Runs as root via the installer. Sets up the agent as a LaunchDaemon.
 
-set -e
-
 AGENT_DIR="/usr/local/orchardpatch/agent"
 LOG_DIR="/var/log/orchardpatch"
 CONFIG_DIR="/etc/orchardpatch"
@@ -22,13 +20,11 @@ chmod 700 "$CONFIG_DIR"
 # ── 2. Install Installomator if not present ──────────────────────────────────
 if [ ! -f "$INSTALLOMATOR_PATH" ]; then
     echo "[OrchardPatch] Downloading Installomator..."
-    curl -fsSL "$INSTALLOMATOR_URL" -o "$INSTALLOMATOR_PATH" || {
-        echo "[OrchardPatch] WARNING: Could not download Installomator. Patching will be unavailable until it is installed."
-    }
-    if [ -f "$INSTALLOMATOR_PATH" ]; then
-        chmod +x "$INSTALLOMATOR_PATH"
-        echo "[OrchardPatch] Installomator installed at $INSTALLOMATOR_PATH"
-    fi
+    # Download directly to final location (we're already root)
+    curl -fsSL "$INSTALLOMATOR_URL" -o "$INSTALLOMATOR_PATH" 2>/dev/null && \
+        chmod +x "$INSTALLOMATOR_PATH" && \
+        echo "[OrchardPatch] Installomator installed at $INSTALLOMATOR_PATH" || \
+        echo "[OrchardPatch] WARNING: Could not download Installomator. Run: sudo curl -fsSL $INSTALLOMATOR_URL -o $INSTALLOMATOR_PATH && sudo chmod +x $INSTALLOMATOR_PATH"
 else
     echo "[OrchardPatch] Installomator already present at $INSTALLOMATOR_PATH"
 fi
