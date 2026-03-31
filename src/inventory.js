@@ -19,7 +19,17 @@ function getDeviceInfo() {
 
     const osVersion = execSync("sw_vers -productVersion", { timeout: 5000 }).toString().trim();
     const osBuild = execSync("sw_vers -buildVersion", { timeout: 5000 }).toString().trim();
-    const hostname = os.hostname();
+    // Prefer ComputerName > LocalHostName > os.hostname()
+    let hostname = os.hostname();
+    try {
+      const computerName = execSync("scutil --get ComputerName 2>/dev/null", { timeout: 3000 }).toString().trim();
+      if (computerName) hostname = computerName;
+    } catch {
+      try {
+        const localHostName = execSync("scutil --get LocalHostName 2>/dev/null", { timeout: 3000 }).toString().trim();
+        if (localHostName) hostname = localHostName;
+      } catch { /* fallback to os.hostname() */ }
+    }
     const serial = hw.serial_number ?? "unknown";
     const model = hw.machine_model ?? hw.machine_name ?? "Mac";
     const cpu = hw.cpu_type ?? "Apple Silicon";
