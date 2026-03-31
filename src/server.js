@@ -51,6 +51,9 @@ app.use(express.json());
 // Simple token auth — set during agent setup
 const AGENT_TOKEN = process.env.ORCHARDPATCH_TOKEN || loadConfig()?.agentToken;
 
+// Track apps Installomator confirmed as current (bundleId → timestamp)
+const installomatorConfirmedCurrent = new Map();
+
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
@@ -113,9 +116,11 @@ app.get("/inventory/local", authMiddleware, async (req, res) => {
         let enrichedApps = cached.apps.map(app => ({
           ...app,
           latestVersion: latestVersions[app.bundleId] ?? null,
-          isOutdated: latestVersions[app.bundleId]
-            ? !versionsMatch(latestVersions[app.bundleId], app.version)
-            : false,
+          isOutdated: installomatorConfirmedCurrent.has(app.bundleId)
+            ? false
+            : latestVersions[app.bundleId]
+              ? !versionsMatch(latestVersions[app.bundleId], app.version)
+              : false,
         }));
         enrichedApps = enrichAppsWithLabels(enrichedApps);
         return res.json({ ...cached, apps: enrichedApps, fromCache: true, cacheAgeMs: cacheAge });
@@ -133,9 +138,11 @@ app.get("/inventory/local", authMiddleware, async (req, res) => {
     let enrichedApps = inventory.apps.map(app => ({
       ...app,
       latestVersion: latestVersions[app.bundleId] ?? null,
-      isOutdated: latestVersions[app.bundleId]
-        ? !versionsMatch(latestVersions[app.bundleId], app.version)
-        : false,
+      isOutdated: installomatorConfirmedCurrent.has(app.bundleId)
+        ? false  // Installomator already confirmed this is current
+        : latestVersions[app.bundleId]
+          ? !versionsMatch(latestVersions[app.bundleId], app.version)
+          : false,
     }));
 
     // Enrich with Installomator labels from catalog
@@ -263,6 +270,17 @@ app.post("/patch", authMiddleware, async (req, res) => {
 
   try {
     const job = await runPatchJob(label, appName, patchMode, deviceId);
+
+    // Watch for job completion to register Installomator-confirmed apps
+    const checkJob = setInterval(() => {
+      if (job.status === "success" && job.installomatorConfirmedCurrent && bundleId) {
+        installomatorConfirmedCurrent.set(bundleId, Date.now());
+        clearInterval(checkJob);
+      } else if (job.status === "failed" || job.status === "success") {
+        clearInterval(checkJob);
+      }
+    }, 1000);
+
     res.json({
       jobId: job.id,
       status: job.status,

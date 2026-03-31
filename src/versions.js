@@ -20,7 +20,8 @@ const BUNDLE_VERSION_MAP = {
   // Browsers
   "com.google.Chrome": {
     label: "googlechromepkg",
-    check: () => fetchJSON("https://chromiumdash.appspot.com/fetch_releases?platform=Mac&channel=Stable&num=1", "[0].version"),
+    // Use the pkg redirect URL — same source Installomator uses, avoids staged rollout false positives
+    check: () => fetchHeaderVersion("https://dl.google.com/chrome/mac/universal/stable/gcem/GoogleChrome.pkg", 6),
   },
   "org.mozilla.firefox": {
     label: "firefox",

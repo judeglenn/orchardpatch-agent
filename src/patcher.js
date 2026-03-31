@@ -281,10 +281,11 @@ async function _executePatch(job, modeFlags) {
         job.status = "success";
         job.log.push(`[INFO] Patch completed successfully (exit 0)`);
 
-        // If Installomator confirmed no newer version, mark app as up to date in cache
+        // If Installomator confirmed no newer version, mark app as up to date
         const noNewerVersion = job.log.some(l => l.includes("No newer version"));
         if (noNewerVersion) {
           job.log.push(`[INFO] Installomator confirmed no newer version — marking as up to date`);
+          // Update cache
           try {
             const { readCache, writeCache } = require("./scheduler");
             const cache = readCache();
@@ -297,6 +298,8 @@ async function _executePatch(job, modeFlags) {
               writeCache(cache);
             }
           } catch { /* ignore */ }
+          // Signal server to suppress outdated flag for this app
+          job.installomatorConfirmedCurrent = true;
         }
 
         // Trigger fresh inventory so UI reflects updated version immediately
