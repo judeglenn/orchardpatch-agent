@@ -280,6 +280,25 @@ async function _executePatch(job, modeFlags) {
       if (code === 0) {
         job.status = "success";
         job.log.push(`[INFO] Patch completed successfully (exit 0)`);
+
+        // If Installomator confirmed no newer version, mark app as up to date in cache
+        const noNewerVersion = job.log.some(l => l.includes("No newer version"));
+        if (noNewerVersion) {
+          job.log.push(`[INFO] Installomator confirmed no newer version — marking as up to date`);
+          try {
+            const { readCache, writeCache } = require("./scheduler");
+            const cache = readCache();
+            if (cache?.apps) {
+              cache.apps = cache.apps.map(a =>
+                (a.bundleId === job.bundleId || a.name === job.appName)
+                  ? { ...a, isOutdated: false }
+                  : a
+              );
+              writeCache(cache);
+            }
+          } catch { /* ignore */ }
+        }
+
         // Trigger fresh inventory so UI reflects updated version immediately
         try {
           const { runCollection } = require("./scheduler");

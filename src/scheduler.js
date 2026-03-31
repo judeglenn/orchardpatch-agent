@@ -70,4 +70,4 @@ function startScheduler(intervalMs = DEFAULT_INTERVAL_MS) {
   setInterval(runCollection, intervalMs);
 }
 
-module.exports = { startScheduler, runCollection, readCache, getCacheAge };
+module.exports = { startScheduler, runCollection, readCache, writeCache, getCacheAge };
