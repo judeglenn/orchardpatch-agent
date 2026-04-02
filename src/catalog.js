@@ -231,10 +231,24 @@ function enrichAppsWithLabels(apps) {
   }));
 }
 
-// Load catalog on module init
+// Load catalog on module init — prefer cached file, fall back to bundled seed
 loadCatalog();
 
-// Kick off background sync if stale (don't await — non-blocking)
+// If no cached catalog yet, seed from bundled static file shipped with the pkg
+if (!catalog.syncedAt) {
+  const BUNDLED_CATALOG = path.join(__dirname, "../data/installomator-catalog.json");
+  try {
+    if (fs.existsSync(BUNDLED_CATALOG)) {
+      const bundled = JSON.parse(fs.readFileSync(BUNDLED_CATALOG, "utf8"));
+      catalog = { ...catalog, ...bundled };
+      console.log("[Catalog] Seeded from bundled catalog -- " + Object.keys(catalog.byName).length + " names, " + catalog.labelList.length + " labels");
+    }
+  } catch (err) {
+    console.warn("[Catalog] Could not load bundled catalog: " + err.message);
+  }
+}
+
+// Kick off background sync if stale (don't await -- non-blocking)
 if (getCatalogAge() > CATALOG_TTL) {
   syncCatalog().catch(err => console.warn("[Catalog] Background sync failed:", err.message));
 }
