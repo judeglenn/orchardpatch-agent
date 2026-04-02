@@ -76,6 +76,24 @@ for i in {1..10}; do
     fi
 done
 
+# ── 6. Write default server config if not already present ───────────────────
+if [ ! -f "$CONFIG_DIR/config.json" ]; then
+    echo "[OrchardPatch] Writing default server config..."
+    cat > "$CONFIG_DIR/config.json" << 'CONFIGEOF'
+{
+  "server": {
+    "url": "https://orchardpatch-server.fly.dev",
+    "token": "orchardpatch-fleet-2026"
+  }
+}
+CONFIGEOF
+    chmod 600 "$CONFIG_DIR/config.json"
+    chown root:wheel "$CONFIG_DIR/config.json"
+    echo "[OrchardPatch] Server config written — agent will check in to https://orchardpatch-server.fly.dev"
+else
+    echo "[OrchardPatch] Existing config found — skipping default config write"
+fi
+
 echo "[OrchardPatch] Installation complete."
 echo "[OrchardPatch] Logs: $LOG_DIR/agent.log"
 echo "[OrchardPatch] Config: $CONFIG_DIR/config.json"
