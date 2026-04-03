@@ -537,8 +537,8 @@
     "gfxcardstatus": "gfxcardstatus",
     "glyphs 3": "glyphs3",
     "glyphs3": "glyphs3",
-    "google chrome": "googlechromeenterprise",
-    "googlechrome": "googlechromeenterprise",
+    "google chrome": "googlechrome",
+    "googlechrome": "googlechrome",
     "backup and sync": "googledrivebackupandsync",
     "backupandsync": "googledrivebackupandsync",
     "goto": "gotowebinar",
@@ -1402,10 +1402,12 @@
     "ulbow": "ulbow",
     "${foldername}/ulbow": "ulbow",
     "universal type client": "universaltypeclient",
-    "universaltypeclient": "universaltypeclient"
+    "universaltypeclient": "universaltypeclient",
+    "chrome": "googlechrome"
   },
   "byBundleId": {
-    "app.kadomaru.daruma": "daruma"
+    "app.kadomaru.daruma": "daruma",
+    "com.google.Chrome": "googlechrome"
   },
   "labelList": [
     "1password7",
