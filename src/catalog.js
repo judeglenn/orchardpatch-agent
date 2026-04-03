@@ -192,13 +192,29 @@ async function syncCatalog(force = false) {
  * Look up the best Installomator label for an installed app.
  * Priority: bundleId match > exact name match > fuzzy name match
  */
+// System/built-in apps that should never be matched to third-party Installomator labels
+const SYSTEM_APP_BLOCKLIST = new Set([
+  "mail", "home", "reminders", "calendar", "contacts", "notes", "maps",
+  "photos", "music", "podcasts", "books", "news", "stocks", "weather",
+  "calculator", "clock", "chess", "automator", "facetime", "imessage",
+  "messages", "preview", "safari", "finder", "siri", "spotlight",
+  "systempreferences", "systemsettings", "appstore", "apps", "app store",
+  "fontbook", "texteditor", "textedit", "dictionary", "voicememos",
+  "screensaver", "activitymonitor", "diskutility", "keychain access",
+  "migration assistant", "bootcamp", "colorsync", "grapher",
+]);
+
 function lookupLabel(appName, bundleId) {
+  // 0. Block system apps from matching
+  if (appName && SYSTEM_APP_BLOCKLIST.has(appName.toLowerCase())) return null;
+  if (bundleId && bundleId.startsWith("com.apple.")) return null;
+
   // 1. Bundle ID exact match (most reliable)
   if (bundleId && catalog.byBundleId[bundleId]) {
     return catalog.byBundleId[bundleId];
   }
 
-  // 2. App name exact match (normalized)
+  // 2. App name exact match (normalized — remove spaces and dots)
   if (appName) {
     const normalized = appName.toLowerCase().replace(/[\s.]+/g, "");
     if (catalog.byName[normalized]) return catalog.byName[normalized];
@@ -210,11 +226,13 @@ function lookupLabel(appName, bundleId) {
     // 4. Original lowercase
     if (catalog.byName[appName.toLowerCase()]) return catalog.byName[appName.toLowerCase()];
 
-    // 5. Partial match — app name starts with label or vice versa
-    const nameKey = Object.keys(catalog.byName).find(k =>
-      k.startsWith(normalized) || normalized.startsWith(k)
-    );
-    if (nameKey) return catalog.byName[nameKey];
+    // 5. Partial match — only if normalized name is >= 5 chars AND
+    //    the catalog key starts with the app name (not vice versa)
+    //    This prevents short names like "r", "home", "chrome" from matching unrelated labels
+    if (normalized.length >= 5) {
+      const nameKey = Object.keys(catalog.byName).find(k => k.startsWith(normalized));
+      if (nameKey) return catalog.byName[nameKey];
+    }
   }
 
   return null;
