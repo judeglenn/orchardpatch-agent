@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const { collectInventory } = require("./inventory");
 const { checkinToServer } = require("./checkin");
+const { enrichAppsWithLabels } = require("./catalog");
 
 const CACHE_DIR = path.join(process.env.HOME || "/var/root", ".orchardpatch");
 const CACHE_FILE = path.join(CACHE_DIR, "inventory-cache.json");
@@ -48,6 +49,8 @@ async function runCollection() {
   try {
     console.log("[OrchardPatch Scheduler] Running scheduled inventory collection...");
     const inventory = collectInventory();
+    // Enrich with Installomator labels before caching and check-in
+    inventory.apps = enrichAppsWithLabels(inventory.apps);
     writeCache(inventory);
     // Report to central server if configured (non-blocking)
     checkinToServer(inventory).catch(err =>
