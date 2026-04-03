@@ -20,7 +20,7 @@
 ###############################################################################
 
 ENROLLMENT_TOKEN="$4"
-SERVER_URL="${5:-https://orchardpatch-server.fly.dev}"
+SERVER_URL="${5:-https://orchardpatch-server-production.up.railway.app}"
 CONFIG_DIR="/etc/orchardpatch"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 
