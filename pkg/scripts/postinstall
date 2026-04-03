@@ -33,16 +33,36 @@ fi
 chmod -R 755 "$AGENT_DIR"
 chown -R root:wheel "$AGENT_DIR"
 
-# Auto-detect node path (handles Homebrew on Apple Silicon vs Intel)
-NODE_BIN=$(which node 2>/dev/null || echo "/usr/local/bin/node")
+# Auto-detect node path (handles Homebrew on Apple Silicon vs Intel vs nvm)
+NODE_BIN=$(which node 2>/dev/null)
+if [ -z "$NODE_BIN" ]; then
+    for candidate in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
+        if [ -x "$candidate" ]; then
+            NODE_BIN="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "$NODE_BIN" ]; then
+    echo "[OrchardPatch] ERROR: Node.js not found. Install Node.js and re-run the installer."
+    exit 1
+fi
 echo "[OrchardPatch] Using node at: $NODE_BIN"
 
-# Create the run script
-cat > "$AGENT_DIR/run.sh" << EOF
+# Create the run script — uses env to find node at runtime (handles PATH changes)
+cat > "$AGENT_DIR/run.sh" << 'RUNEOF'
 #!/bin/bash
+# Find node across common locations
+for n in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
+    if [ -x "$n" ]; then NODE_BIN="$n"; break; fi
+done
+if [ -z "$NODE_BIN" ]; then
+    echo "[OrchardPatch] ERROR: Node.js not found"
+    exit 1
+fi
 cd /usr/local/orchardpatch/agent
-exec $NODE_BIN src/server.js
-EOF
+exec "$NODE_BIN" src/server.js
+RUNEOF
 chmod +x "$AGENT_DIR/run.sh"
 
 # ── 4. Install LaunchDaemon ──────────────────────────────────────────────────
