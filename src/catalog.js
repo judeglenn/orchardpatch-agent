@@ -252,18 +252,27 @@ function enrichAppsWithLabels(apps) {
 // Load catalog on module init — prefer cached file, fall back to bundled seed
 loadCatalog();
 
-// If no cached catalog yet, seed from bundled static file shipped with the pkg
-if (!catalog.syncedAt) {
-  const BUNDLED_CATALOG = path.join(__dirname, "../data/installomator-catalog.json");
-  try {
-    if (fs.existsSync(BUNDLED_CATALOG)) {
-      const bundled = JSON.parse(fs.readFileSync(BUNDLED_CATALOG, "utf8"));
+// Always merge bundled catalog on top of cached catalog.
+// This ensures new bundle ID mappings (e.g. com.google.Chrome) from PKG updates
+// are applied even when an existing cached catalog is present.
+const BUNDLED_CATALOG = path.join(__dirname, "../data/installomator-catalog.json");
+try {
+  if (fs.existsSync(BUNDLED_CATALOG)) {
+    const bundled = JSON.parse(fs.readFileSync(BUNDLED_CATALOG, "utf8"));
+    if (!catalog.syncedAt) {
+      // No cached catalog — use bundled as full seed
       catalog = { ...catalog, ...bundled };
       console.log("[Catalog] Seeded from bundled catalog -- " + Object.keys(catalog.byName).length + " names, " + catalog.labelList.length + " labels");
+    } else {
+      // Cached catalog exists — merge bundled bundle IDs and names on top
+      // Bundled entries are curated overrides, so they win
+      catalog.byBundleId = { ...catalog.byBundleId, ...(bundled.byBundleId || {}) };
+      catalog.byName = { ...catalog.byName, ...(bundled.byName || {}) };
+      console.log("[Catalog] Merged bundled overrides into cached catalog -- " + Object.keys(catalog.byBundleId).length + " bundle IDs");
     }
-  } catch (err) {
-    console.warn("[Catalog] Could not load bundled catalog: " + err.message);
   }
+} catch (err) {
+  console.warn("[Catalog] Could not load bundled catalog: " + err.message);
 }
 
 // Kick off background sync if stale (don't await -- non-blocking)
