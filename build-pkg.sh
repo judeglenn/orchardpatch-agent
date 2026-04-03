@@ -26,6 +26,7 @@ mkdir -p "$PAYLOAD_DIR$INSTALL_PATH"
 # ── 2. Copy agent source ──────────────────────────────────────────────────────
 echo "→ Copying agent source..."
 cp -r "$AGENT_DIR/src" "$PAYLOAD_DIR$INSTALL_PATH/"
+cp -r "$AGENT_DIR/data" "$PAYLOAD_DIR$INSTALL_PATH/"
 cp "$AGENT_DIR/package.json" "$PAYLOAD_DIR$INSTALL_PATH/"
 cp "$AGENT_DIR/package-lock.json" "$PAYLOAD_DIR$INSTALL_PATH/" 2>/dev/null || true
 
