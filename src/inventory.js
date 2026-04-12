@@ -51,6 +51,30 @@ function getDeviceInfo() {
   }
 }
 
+const CATEGORY_MAP = {
+  "public.app-category.productivity": "Productivity",
+  "public.app-category.social-networking": "Communication",
+  "public.app-category.music": "Media",
+  "public.app-category.video": "Media",
+  "public.app-category.graphics-design": "Design",
+  "public.app-category.developer-tools": "Development",
+  "public.app-category.business": "Business",
+  "public.app-category.education": "Education",
+  "public.app-category.entertainment": "Entertainment",
+  "public.app-category.finance": "Finance",
+  "public.app-category.games": "Games",
+  "public.app-category.healthcare-fitness": "Health & Fitness",
+  "public.app-category.lifestyle": "Lifestyle",
+  "public.app-category.medical": "Medical",
+  "public.app-category.news": "News",
+  "public.app-category.photography": "Photography",
+  "public.app-category.reference": "Reference",
+  "public.app-category.sports": "Sports",
+  "public.app-category.travel": "Travel",
+  "public.app-category.utilities": "Utilities",
+  "public.app-category.weather": "Weather",
+};
+
 /**
  * Get installed apps by scanning /Applications and ~/Applications
  * Reads Info.plist from each .app bundle for name + version
@@ -99,6 +123,8 @@ function getInstalledApps() {
         const bundleId = getName("CFBundleIdentifier");
         const name = getName("CFBundleName") || getName("CFBundleDisplayName") || entry.replace(".app", "");
         const version = getName("CFBundleShortVersionString") || getName("CFBundleVersion") || "unknown";
+        const rawCategory = getName("LSApplicationCategoryType");
+        const category = rawCategory ? (CATEGORY_MAP[rawCategory] ?? null) : null;
 
         if (!bundleId || seen.has(bundleId)) continue;
         seen.add(bundleId);
@@ -109,6 +135,7 @@ function getInstalledApps() {
           version,
           path: appPath,
           source: dir.startsWith("/System") ? "system" : "user",
+          category,
         });
       } catch {
         // Skip apps we can't read
