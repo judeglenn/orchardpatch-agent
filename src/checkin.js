@@ -99,4 +99,51 @@ async function reportPatchJob(job) {
   });
 }
 
-module.exports = { checkinToServer, reportPatchJob };
+/**
+ * Fetch pending patches assigned to this device from the fleet server.
+ * Returns an array of patch objects (may be empty).
+ */
+async function fetchPendingPatches(deviceId) {
+  const config = loadConfig();
+  const serverUrl = config.server?.url || process.env.ORCHARDPATCH_SERVER_URL;
+  const serverToken = config.server?.token || process.env.ORCHARDPATCH_SERVER_TOKEN;
+
+  if (!serverUrl || !serverToken) return [];
+
+  const res = await fetch(
+    `${serverUrl}/pending-patches?device_id=${encodeURIComponent(deviceId)}`,
+    {
+      headers: { "x-orchardpatch-token": serverToken },
+      signal: AbortSignal.timeout(10000),
+    }
+  );
+
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.patches || []);
+}
+
+/**
+ * Claim a pending patch so no other agent picks it up.
+ * Returns true if successfully claimed.
+ */
+async function claimPatch(patchId) {
+  const config = loadConfig();
+  const serverUrl = config.server?.url || process.env.ORCHARDPATCH_SERVER_URL;
+  const serverToken = config.server?.token || process.env.ORCHARDPATCH_SERVER_TOKEN;
+
+  if (!serverUrl || !serverToken) return false;
+
+  const res = await fetch(`${serverUrl}/pending-patches/${patchId}/claim`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-orchardpatch-token": serverToken,
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+
+  return res.ok;
+}
+
+module.exports = { checkinToServer, reportPatchJob, fetchPendingPatches, claimPatch };
