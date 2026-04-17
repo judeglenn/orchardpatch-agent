@@ -12,11 +12,16 @@ const { checkinToServer, fetchPendingPatches, claimPatch, reportPatchJob } = req
 const { enrichAppsWithLabels, lookupLabel } = require("./catalog");
 const { runPatchJob } = require("./patcher");
 const { getOverride } = require("./overrides");
+const { runVersionCheck } = require("./version-checker");
 
 const CACHE_DIR = path.join(process.env.HOME || "/var/root", ".orchardpatch");
 const CACHE_FILE = path.join(CACHE_DIR, "inventory-cache.json");
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const POLL_INTERVAL_MS = 45 * 1000; // 45 seconds
+
+// Version check: run every N check-ins (configurable)
+const VERSION_CHECK_INTERVAL = parseInt(process.env.VERSION_CHECK_INTERVAL) || 10;
+let checkinCount = 0;
 
 function ensureCacheDir() {
   if (!fs.existsSync(CACHE_DIR)) {
@@ -60,6 +65,17 @@ async function runCollection() {
     checkinToServer(inventory).catch(err =>
       console.warn("[OrchardPatch Scheduler] Server check-in failed:", err.message)
     );
+
+    // Every N check-ins, run a version batch and ingest results to fleet server
+    // Fire-and-forget — does not block the check-in response
+    checkinCount++;
+    if (checkinCount % VERSION_CHECK_INTERVAL === 0) {
+      console.log(`[OrchardPatch Scheduler] Check-in #${checkinCount} — triggering version check batch`);
+      runVersionCheck(inventory.apps).catch(err =>
+        console.warn("[OrchardPatch Scheduler] Version check failed:", err.message)
+      );
+    }
+
     return inventory;
   } catch (err) {
     console.error("[OrchardPatch Scheduler] Collection failed:", err.message);
