@@ -16,12 +16,31 @@ const { runVersionCheck } = require("./version-checker");
 
 const CACHE_DIR = path.join(process.env.HOME || "/var/root", ".orchardpatch");
 const CACHE_FILE = path.join(CACHE_DIR, "inventory-cache.json");
+const DEVICE_ID_FILE = path.join(CACHE_DIR, "device-id.json");
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const POLL_INTERVAL_MS = 45 * 1000; // 45 seconds
 
 // Version check: run every N check-ins (configurable)
 const VERSION_CHECK_INTERVAL = parseInt(process.env.VERSION_CHECK_INTERVAL) || 10;
 let checkinCount = 0;
+
+// Canonical device ID as assigned by the fleet server (serial-based).
+// Persisted to disk so pollAndRunPatches can use it even between scheduler cycles.
+function saveDeviceId(id) {
+  try {
+    ensureCacheDir();
+    fs.writeFileSync(DEVICE_ID_FILE, JSON.stringify({ deviceId: id }));
+  } catch { /* ignore */ }
+}
+
+function loadDeviceId() {
+  try {
+    if (fs.existsSync(DEVICE_ID_FILE)) {
+      return JSON.parse(fs.readFileSync(DEVICE_ID_FILE, "utf8")).deviceId || null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
 
 function ensureCacheDir() {
   if (!fs.existsSync(CACHE_DIR)) {
@@ -61,8 +80,10 @@ async function runCollection() {
     // Enrich with Installomator labels before caching and check-in
     inventory.apps = enrichAppsWithLabels(inventory.apps);
     writeCache(inventory);
-    // Report to central server if configured (non-blocking)
-    checkinToServer(inventory).catch(err =>
+    // Report to central server if configured — persist the server-assigned deviceId
+    checkinToServer(inventory).then(data => {
+      if (data?.deviceId) saveDeviceId(data.deviceId);
+    }).catch(err =>
       console.warn("[OrchardPatch Scheduler] Server check-in failed:", err.message)
     );
 
@@ -84,7 +105,9 @@ async function runCollection() {
 }
 
 function getDeviceId() {
-  return `device-${os.hostname()}`;
+  // Prefer the server-assigned ID (serial-based) persisted from the last checkin.
+  // Fall back to hostname-based guess only if we haven't checked in yet.
+  return loadDeviceId() || `device-${os.hostname()}`;
 }
 
 function waitForJob(job) {
