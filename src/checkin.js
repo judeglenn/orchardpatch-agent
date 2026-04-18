@@ -7,6 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { enrichAppsWithLabels } = require("./catalog");
 
 const CONFIG_PATH = process.getuid && process.getuid() === 0
   ? "/etc/orchardpatch/config.json"
@@ -58,9 +59,10 @@ async function checkinToServer(inventory) {
     return;
   }
 
+  const enrichedApps = enrichAppsWithLabels(inventory.apps);
   const payload = {
     device: inventory.device,
-    apps: inventory.apps,
+    apps: enrichedApps,
     agentVersion: AGENT_VERSION,
     collectedAt: inventory.collectedAt || new Date().toISOString(),
   };
