@@ -20,6 +20,7 @@ const CONFIG_PATH = process.getuid && process.getuid() === 0
 // Installomator paths (try pkg install location first, then homebrew)
 const INSTALLOMATOR_PATHS = [
   "/usr/local/Installomator/Installomator.sh",
+  "/usr/local/bin/Installomator.sh",
   "/usr/local/bin/Installomator",
   "/opt/homebrew/bin/Installomator",
 ];
