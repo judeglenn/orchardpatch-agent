@@ -213,6 +213,37 @@ async function runPatchJob(label, appName, mode, deviceId) {
   return job;
 }
 
+/**
+ * POST a confirmed installed version to the fleet server's version-sync ingest.
+ * Called after a successful Installomator run to keep latest_versions accurate.
+ */
+async function ingestConfirmedVersion(label, version) {
+  const fs = require("fs");
+  const CONFIG_PATH = process.getuid && process.getuid() === 0
+    ? "/etc/orchardpatch/config.json"
+    : require("path").join(require("os").homedir(), ".orchardpatch", "config.json");
+
+  let config = {};
+  try { config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); } catch { /* ignore */ }
+
+  const serverUrl = config.server?.url || process.env.ORCHARDPATCH_SERVER_URL;
+  const serverToken = config.server?.token || process.env.ORCHARDPATCH_SERVER_TOKEN;
+  if (!serverUrl || !serverToken) return;
+
+  const res = await fetch(`${serverUrl}/api/version-sync/ingest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-orchardpatch-token": serverToken },
+    body: JSON.stringify({ results: { [label]: { version, error: null } }, source: "post-patch" }),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (res.ok) {
+    console.log(`[Patcher] Ingested confirmed version ${label}@${version} to fleet server`);
+  } else {
+    throw new Error(`Ingest returned ${res.status}`);
+  }
+}
+
 async function _executePatch(job, modeFlags) {
   job.status = "running";
   job.startedAt = new Date().toISOString();
@@ -281,25 +312,35 @@ async function _executePatch(job, modeFlags) {
         job.status = "success";
         job.log.push(`[INFO] Patch completed successfully (exit 0)`);
 
-        // If Installomator confirmed no newer version, mark app as up to date
-        const noNewerVersion = job.log.some(l => l.includes("No newer version"));
-        if (noNewerVersion) {
-          job.log.push(`[INFO] Installomator confirmed no newer version — marking as up to date`);
-          // Update cache
-          try {
-            const { readCache, writeCache } = require("./scheduler");
-            const cache = readCache();
-            if (cache?.apps) {
-              cache.apps = cache.apps.map(a =>
-                (a.bundleId === job.bundleId || a.name === job.appName)
-                  ? { ...a, isOutdated: false }
-                  : a
-              );
-              writeCache(cache);
+        // Parse the version Installomator actually installed from its log output.
+        // Prefer "Downloaded version of X is <ver>" — this is the version that
+        // actually landed on disk. Fall back to appNewVersion from the version
+        // check phase if the download line isn't present (e.g. "No newer version").
+        const allLog = job.log.join("\n");
+        let confirmedVersion = null;
+
+        const downloadedMatch = allLog.match(/Downloaded version.*?is\s+([\d][\d.]+[\d])/i);
+        if (downloadedMatch) {
+          confirmedVersion = downloadedMatch[1].trim();
+          job.log.push(`[INFO] Installed version confirmed from Installomator: ${confirmedVersion}`);
+        } else {
+          // "No newer version" — the installed version IS the latest
+          const noNewer = allLog.includes("No newer version");
+          if (noNewer) {
+            // Try to parse current appversion from log: "appversion: X.Y.Z"
+            const appVerMatch = allLog.match(/appversion:\s*([\d][\d.]+[\d])/i);
+            if (appVerMatch) {
+              confirmedVersion = appVerMatch[1].trim();
+              job.log.push(`[INFO] Already current — version from log: ${confirmedVersion}`);
             }
-          } catch { /* ignore */ }
-          // Signal server to suppress outdated flag for this app
-          job.installomatorConfirmedCurrent = true;
+          }
+        }
+
+        // Ingest confirmed version into fleet server latest_versions table
+        if (confirmedVersion && job.label) {
+          ingestConfirmedVersion(job.label, confirmedVersion).catch(err =>
+            job.log.push(`[WARN] Version ingest failed: ${err.message}`)
+          );
         }
 
         // Trigger fresh inventory so UI reflects updated version immediately
