@@ -213,19 +213,57 @@ async function runPatchJob(label, appName, mode, deviceId) {
   return job;
 }
 
+function loadServerConfig() {
+  const CONFIG_PATH = process.getuid && process.getuid() === 0
+    ? "/etc/orchardpatch/config.json"
+    : require("path").join(require("os").homedir(), ".orchardpatch", "config.json");
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); } catch { return {}; }
+}
+
+/**
+ * POST the completed job record to the fleet server's /patch-jobs endpoint.
+ * This is what populates Patch History and success rate stats in the dashboard.
+ */
+async function reportJobToServer(job) {
+  const config = loadServerConfig();
+  const serverUrl = config.server?.url || process.env.ORCHARDPATCH_SERVER_URL;
+  const serverToken = config.server?.token || process.env.ORCHARDPATCH_SERVER_TOKEN;
+  if (!serverUrl || !serverToken) return;
+
+  const res = await fetch(`${serverUrl}/patch-jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-orchardpatch-token": serverToken },
+    body: JSON.stringify({
+      jobId: job.id,
+      deviceId: job.deviceId,
+      bundleId: job.bundleId || null,
+      appName: job.appName,
+      label: job.label,
+      mode: job.mode,
+      status: job.status,
+      exitCode: job.exitCode,
+      error: job.error || null,
+      log: job.log.join("\n"),
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (res.ok) {
+    console.log(`[Patcher] Reported job ${job.id} (${job.status}) to fleet server`);
+  } else {
+    throw new Error(`Server returned ${res.status}`);
+  }
+}
+
 /**
  * POST a confirmed installed version to the fleet server's version-sync ingest.
  * Called after a successful Installomator run to keep latest_versions accurate.
  */
 async function ingestConfirmedVersion(label, version) {
-  const fs = require("fs");
-  const CONFIG_PATH = process.getuid && process.getuid() === 0
-    ? "/etc/orchardpatch/config.json"
-    : require("path").join(require("os").homedir(), ".orchardpatch", "config.json");
-
-  let config = {};
-  try { config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); } catch { /* ignore */ }
-
+  const config = loadServerConfig();
   const serverUrl = config.server?.url || process.env.ORCHARDPATCH_SERVER_URL;
   const serverToken = config.server?.token || process.env.ORCHARDPATCH_SERVER_TOKEN;
   if (!serverUrl || !serverToken) return;
@@ -359,6 +397,12 @@ async function _executePatch(job, modeFlags) {
       }
 
       saveHistory();
+
+      // Report completed job to fleet server (populates Patch History + stats)
+      reportJobToServer(job).catch(err =>
+        job.log.push(`[WARN] Failed to report job to server: ${err.message}`)
+      );
+
       resolve();
     });
 
@@ -373,6 +417,11 @@ async function _executePatch(job, modeFlags) {
       }
       job.completedAt = new Date().toISOString();
       saveHistory();
+
+      reportJobToServer(job).catch(e =>
+        console.warn(`[Patcher] Failed to report job to server: ${e.message}`)
+      );
+
       resolve();
     });
   });
