@@ -8,11 +8,12 @@ Install it on any Mac and it shows up in your OrchardPatch dashboard automatical
 
 ## What it does
 
-- Collects a full app inventory every 15 minutes
-- Matches installed apps to Installomator labels (1,400+ apps supported)
-- Reports to your OrchardPatch fleet server
-- Accepts patch jobs triggered from the dashboard
-- Runs silently as a LaunchDaemon — no user interaction required
+- Collects a full app inventory every 15 minutes and reports to your fleet server
+- Matches installed apps to Installomator labels (1,083+ apps supported)
+- Polls for patch jobs queued from the dashboard and executes them via Installomator
+- Runs version checks every ~2.5 hours (every 10 check-ins), pushing latest version data to the fleet server
+- After a successful patch: immediately ingests the confirmed installed version and triggers a fresh inventory check-in
+- Runs silently as a LaunchDaemon — no user interaction required, no sudo needed
 
 ## Requirements
 
@@ -25,15 +26,13 @@ Install it on any Mac and it shows up in your OrchardPatch dashboard automatical
 
 ## Installation
 
-### Quick install (pre-configured for your org)
-
-Download the PKG from your OrchardPatch dashboard under **Settings → Agent Enrollment**, then:
+### Quick install
 
 ```bash
 sudo installer -pkg OrchardPatch-Agent.pkg -target /
 ```
 
-The agent starts automatically and your Mac appears in the fleet within 60 seconds. No configuration required.
+The agent starts automatically and your Mac appears in the fleet within 60 seconds.
 
 ### Deploy via Jamf Pro
 
