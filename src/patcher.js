@@ -403,8 +403,10 @@ async function _executePatch(job, modeFlags) {
       try {
         await reportJobToServer(job);
       } catch (err) {
-        console.warn(`[Patcher] Failed to report job to server: ${err.message}`);
-        job.log.push(`[WARN] Failed to report job to server: ${err.message}`);
+        const msg = `Failed to report job to server: ${err.message}`;
+        console.warn(`[Patcher] ${msg}`);
+        job.log.push(`[WARN] ${msg}`);
+        saveHistory(); // persist the warn to disk
       }
 
       resolve();

@@ -145,8 +145,10 @@ async function pollAndRunPatches() {
         continue;
       }
 
-      const { bundleId, appName, mode } = patch;
-      let { label } = patch;
+      const bundleId = patch.bundleId ?? patch.bundle_id;
+      const appName = patch.appName ?? patch.app_name;
+      const mode = patch.mode;
+      let label = patch.label;
 
       if (!label && bundleId) {
         label = getOverride(bundleId) || lookupLabel(appName, bundleId) || null;
