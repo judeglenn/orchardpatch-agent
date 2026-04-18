@@ -399,14 +399,18 @@ async function _executePatch(job, modeFlags) {
       saveHistory();
 
       // Report completed job to fleet server (populates Patch History + stats)
-      reportJobToServer(job).catch(err =>
-        job.log.push(`[WARN] Failed to report job to server: ${err.message}`)
-      );
+      // Must await before resolve() — fire-and-forget gets dropped after Promise resolves
+      try {
+        await reportJobToServer(job);
+      } catch (err) {
+        console.warn(`[Patcher] Failed to report job to server: ${err.message}`);
+        job.log.push(`[WARN] Failed to report job to server: ${err.message}`);
+      }
 
       resolve();
     });
 
-    proc.on("error", (err) => {
+    proc.on("error", async (err) => {
       job.status = "failed";
       job.error = err.message;
       job.log.push(`[ERROR] Process error: ${err.message}`);
@@ -418,9 +422,11 @@ async function _executePatch(job, modeFlags) {
       job.completedAt = new Date().toISOString();
       saveHistory();
 
-      reportJobToServer(job).catch(e =>
-        console.warn(`[Patcher] Failed to report job to server: ${e.message}`)
-      );
+      try {
+        await reportJobToServer(job);
+      } catch (e) {
+        console.warn(`[Patcher] Failed to report job to server: ${e.message}`);
+      }
 
       resolve();
     });
