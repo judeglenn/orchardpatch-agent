@@ -122,29 +122,56 @@ async function checkVersionBatch(labels) {
 }
 
 /**
- * Build the label list from installed apps via catalog lookup.
- * Falls back to SEED_LABELS if catalog has no labels yet.
+ * Build the label list from installed apps, then union in fleet-known labels
+ * from the server. Fleet labels cover apps installed on other devices that
+ * this device hasn't seen yet — ensures the full label space is checked.
+ * Falls back to SEED_LABELS if local inventory is empty.
  */
-function buildLabelList(installedApps) {
-  const { getCatalog } = require("./catalog");
-  const cat = getCatalog();
-
-  // If catalog is populated, pull labels from installed apps that have matches
+async function buildLabelList(installedApps) {
+  // Step 1: build local list from this device's inventory
+  let localLabels = [];
   if (installedApps && installedApps.length > 0) {
     const labels = installedApps
       .map(app => app.installomatorLabel)
       .filter(Boolean);
-
-    const unique = [...new Set(labels)];
-    if (unique.length > 0) {
-      console.log(`[VersionChecker] ${unique.length} labels from installed app inventory`);
-      return unique;
-    }
+    localLabels = [...new Set(labels)];
   }
 
-  // Fallback: use seed list
-  console.log(`[VersionChecker] No app inventory labels — using ${SEED_LABELS.length} seed labels`);
-  return SEED_LABELS;
+  // Seed fallback if local inventory has no labels
+  if (localLabels.length === 0) {
+    console.log(`[VersionChecker] No app inventory labels — using ${SEED_LABELS.length} seed labels`);
+    localLabels = SEED_LABELS;
+  }
+
+  // Step 2: fetch fleet-wide labels from server
+  let fleetLabels = [];
+  try {
+    const config = loadConfig();
+    const serverUrl = config.server?.url || process.env.ORCHARDPATCH_SERVER_URL;
+    const serverToken = config.server?.token || process.env.ORCHARDPATCH_SERVER_TOKEN;
+
+    if (serverUrl && serverToken) {
+      const res = await fetch(`${serverUrl}/api/version-sync`, {
+        headers: { "x-orchardpatch-token": serverToken },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        fleetLabels = (data.versions || []).map(v => v.label).filter(Boolean);
+      } else {
+        console.warn(`[VersionChecker] Fleet label fetch failed: ${res.status} — using local labels only`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[VersionChecker] Fleet label fetch error: ${err.message} — using local labels only`);
+  }
+
+  // Step 3: union — always additive, never drop a local label
+  const combined = [...new Set([...localLabels, ...fleetLabels])];
+  const fleetOnly = combined.length - localLabels.length;
+  console.log(`[VersionChecker] Labels: ${localLabels.length} local + ${fleetOnly} fleet-only = ${combined.length} total`);
+
+  return combined;
 }
 
 /**
@@ -189,7 +216,7 @@ async function ingestToServer(results) {
  * Designed to be called async/fire-and-forget from the scheduler.
  */
 async function runVersionCheck(installedApps) {
-  const labels = buildLabelList(installedApps);
+  const labels = await buildLabelList(installedApps);
   if (labels.length === 0) return;
 
   const results = await checkVersionBatch(labels);
