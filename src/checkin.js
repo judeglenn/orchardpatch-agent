@@ -12,7 +12,28 @@ const CONFIG_PATH = process.getuid && process.getuid() === 0
   ? "/etc/orchardpatch/config.json"
   : path.join(os.homedir(), ".orchardpatch", "config.json");
 
+const DEVICE_ID_DIR = process.getuid && process.getuid() === 0
+  ? "/var/root/.orchardpatch"
+  : path.join(os.homedir(), ".orchardpatch");
+const DEVICE_ID_FILE = path.join(DEVICE_ID_DIR, "device-id.json");
+
 const AGENT_VERSION = "0.1.0";
+
+function saveDeviceId(deviceId) {
+  try {
+    if (!fs.existsSync(DEVICE_ID_DIR)) fs.mkdirSync(DEVICE_ID_DIR, { recursive: true });
+    fs.writeFileSync(DEVICE_ID_FILE, JSON.stringify({ deviceId }));
+  } catch { /* non-fatal */ }
+}
+
+function loadDeviceId() {
+  try {
+    if (fs.existsSync(DEVICE_ID_FILE)) {
+      return JSON.parse(fs.readFileSync(DEVICE_ID_FILE, "utf8")).deviceId || null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
 
 function loadConfig() {
   try {
@@ -61,6 +82,7 @@ async function checkinToServer(inventory) {
 
   const data = await res.json();
   console.log(`[CheckIn] Reported to server — deviceId: ${data.deviceId}`);
+  if (data.deviceId) saveDeviceId(data.deviceId);
   return data;
 }
 
@@ -82,7 +104,7 @@ async function reportPatchJob(job) {
     },
     body: JSON.stringify({
       jobId: job.id,
-      deviceId: `device-${os.hostname()}`,
+      deviceId: loadDeviceId() || job.deviceId || `device-${os.hostname()}`,
       bundleId: job.bundleId,
       appName: job.appName,
       label: job.label,
@@ -146,4 +168,4 @@ async function claimPatch(patchId) {
   return res.ok;
 }
 
-module.exports = { checkinToServer, reportPatchJob, fetchPendingPatches, claimPatch };
+module.exports = { checkinToServer, reportPatchJob, fetchPendingPatches, claimPatch, saveDeviceId, loadDeviceId };
