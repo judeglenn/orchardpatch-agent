@@ -134,7 +134,7 @@ function getInstalledApps() {
           bundleId,
           version,
           path: appPath,
-          source: dir.startsWith("/System") ? "system" : "user",
+          source: dir.startsWith("/System") || bundleId.startsWith("com.apple.") ? "system" : "user",
           category,
         });
       } catch {
