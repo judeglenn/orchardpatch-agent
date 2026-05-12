@@ -72,7 +72,12 @@ function checkLabelVersion(installomatorPath, label) {
 
     const match = output.match(/appNewVersion\s*=\s*["']?([^\s"'\n]+)["']?/i);
     if (match) {
-      return { version: match[1].trim(), error: null };
+      const version = match[1].trim();
+      const looksLikeVersion = /^\d+\.\d/.test(version);
+      if (!looksLikeVersion) {
+        return { version: null, error: `Rejected non-version string: ${version.slice(0, 80)}` };
+      }
+      return { version, error: null };
     }
 
     // Installomator ran but no version found — app may not have a version check
@@ -82,7 +87,12 @@ function checkLabelVersion(installomatorPath, label) {
     const output = (err.stdout?.toString() || "") + (err.stderr?.toString() || "");
     const match = output.match(/appNewVersion\s*=\s*["']?([^\s"'\n]+)["']?/i);
     if (match) {
-      return { version: match[1].trim(), error: null };
+      const version = match[1].trim();
+      const looksLikeVersion = /^\d+\.\d/.test(version);
+      if (!looksLikeVersion) {
+        return { version: null, error: `Rejected non-version string: ${version.slice(0, 80)}` };
+      }
+      return { version, error: null };
     }
     return { version: null, error: err.message.slice(0, 200) };
   }
