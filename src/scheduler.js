@@ -139,7 +139,7 @@ async function pollAndRunPatches() {
       }
 
       console.log(`[OrchardPatch Poller] Running patch: ${appName} (${label}) mode=${mode || "managed"}`);
-      const job = await runPatchJob(label, appName, mode || "managed", deviceId);
+      const job = await runPatchJob(label, appName, mode || "managed", deviceId, patch.id);
 
       await waitForJob(job);
 

@@ -161,8 +161,8 @@ loadHistory();
 
 // ─── Job management ──────────────────────────────────────────────────────────
 
-function createJob(label, appName, mode, deviceId) {
-  const id = `job-${Date.now()}-${++jobCounter}`;
+function createJob(label, appName, mode, deviceId, patchId) {
+  const id = patchId || ('job-' + Date.now() + '-' + (++jobCounter));
   const job = {
     id,
     label,
@@ -198,8 +198,8 @@ function listJobs() {
  * Run a patch job asynchronously.
  * Returns the job immediately (status: queued), then updates it as it runs.
  */
-async function runPatchJob(label, appName, mode, deviceId) {
-  const job = createJob(label, appName, mode, deviceId);
+async function runPatchJob(label, appName, mode, deviceId, patchId) {
+  const job = createJob(label, appName, mode, deviceId, patchId);
   const modeFlags = PATCH_MODE_FLAGS[mode] || PATCH_MODE_FLAGS.managed;
 
   // Run async — don't await
