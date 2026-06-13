@@ -62,10 +62,10 @@ function findInstallomator() {
 function checkLabelVersion(installomatorPath, label) {
   try {
     const output = execSync(
-      `DEBUG=1 NOTIFY=silent "${installomatorPath}" "${label}"`,
+      `"${installomatorPath}" "${label}" NOTIFY=silent`,
       {
         timeout: 30000,
-        env: { ...process.env, DEBUG: "1", NOTIFY: "silent" },
+        env: { ...process.env, DEBUG: "1" },
         stdio: ["ignore", "pipe", "pipe"],
       }
     ).toString();
