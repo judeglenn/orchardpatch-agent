@@ -19,9 +19,9 @@ const https = require("https");
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const INSTALLOMATOR_PATHS = [
+  "/usr/local/Installomator/Installomator.sh",
   "/usr/local/bin/Installomator.sh",
   "/usr/local/bin/Installomator",
-  "/usr/local/Installomator/Installomator.sh",
 ];
 
 const INSTALLOMATOR_DOWNLOAD_URL =
