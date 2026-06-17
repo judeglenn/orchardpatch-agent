@@ -62,8 +62,7 @@ function findInstallomator() {
  */
 function checkLabelVersion(installomatorPath, label) {
   return new Promise((resolve) => {
-    const VERSION_RE = /appNewVersion\s*=\s*["']?([^\s"'
-]+)["']?/i;
+    const VERSION_RE = /appNewVersion\s*=\s*["']?([^\s"'\n]+)["']?/i;
     // 12s timeout — enough for API/HEAD version checks, not enough for full downloads
     const TIMEOUT_MS = 12000;
     let resolved = false;
