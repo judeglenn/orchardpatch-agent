@@ -8,7 +8,7 @@
  * Installomator as the source of truth, matching exactly what patching uses.
  */
 
-const { execSync } = require("child_process");
+const { execSync, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -60,15 +60,16 @@ function findInstallomator() {
  * Returns { version: string|null, error: string|null }
  */
 function checkLabelVersion(installomatorPath, label) {
-  try {
-    const output = execSync(
-      `"${installomatorPath}" "${label}" NOTIFY=silent DEBUG=1`,
-      {
-        timeout: 30000,
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    ).toString();
+  // Use spawnSync (no shell) to avoid /bin/sh spawn issues in daemon context
+  const result = spawnSync(
+    installomatorPath,
+    [label, "NOTIFY=silent", "DEBUG=1"],
+    { timeout: 30000, encoding: "utf8" }
+  );
 
+  const output = (result.stdout || "") + (result.stderr || "");
+
+  try {
     const match = output.match(/appNewVersion\s*=\s*["']?([^\s"'\n]+)["']?/i);
     if (match) {
       const version = match[1].trim();
@@ -77,22 +78,15 @@ function checkLabelVersion(installomatorPath, label) {
         return { version: null, error: `Rejected non-version string: ${version.slice(0, 80)}` };
       }
       return { version, error: null };
+    }
+
+    if (result.error) {
+      return { version: null, error: result.error.message.slice(0, 200) };
     }
 
     // Installomator ran but no version found — app may not have a version check
     return { version: null, error: null };
   } catch (err) {
-    // execSync throws on non-zero exit — still try to parse from stderr/stdout
-    const output = (err.stdout?.toString() || "") + (err.stderr?.toString() || "");
-    const match = output.match(/appNewVersion\s*=\s*["']?([^\s"'\n]+)["']?/i);
-    if (match) {
-      const version = match[1].trim();
-      const looksLikeVersion = /^\d+\.\d/.test(version);
-      if (!looksLikeVersion) {
-        return { version: null, error: `Rejected non-version string: ${version.slice(0, 80)}` };
-      }
-      return { version, error: null };
-    }
     return { version: null, error: err.message.slice(0, 200) };
   }
 }
