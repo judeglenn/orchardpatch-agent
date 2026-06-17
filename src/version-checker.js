@@ -8,7 +8,7 @@
  * Installomator as the source of truth, matching exactly what patching uses.
  */
 
-const { execSync, spawnSync } = require("child_process");
+const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -57,40 +57,70 @@ function findInstallomator() {
 
 /**
  * Run Installomator DEBUG=1 for a single label and parse appNewVersion.
- * Returns { version: string|null, error: string|null }
+ * Kills the process as soon as appNewVersion is found — avoids full package download.
+ * Returns Promise<{ version: string|null, error: string|null }>
  */
 function checkLabelVersion(installomatorPath, label) {
-  // Use spawnSync (no shell) to avoid /bin/sh spawn issues in daemon context
-  const result = spawnSync(
-    installomatorPath,
-    [label, "NOTIFY=silent", "DEBUG=1"],
-    { timeout: 30000, encoding: "utf8" }
-  );
+  return new Promise((resolve) => {
+    const VERSION_RE = /appNewVersion\s*=\s*["']?([^\s"'
+]+)["']?/i;
+    // 12s timeout — enough for API/HEAD version checks, not enough for full downloads
+    const TIMEOUT_MS = 12000;
+    let resolved = false;
+    let stdoutBuf = "";
+    let stderrBuf = "";
 
-  const output = (result.stdout || "") + (result.stderr || "");
+    const child = spawn(installomatorPath, [label, "NOTIFY=silent", "DEBUG=1"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
-  try {
-    const match = output.match(/appNewVersion\s*=\s*["']?([^\s"'\n]+)["']?/i);
-    if (match) {
-      const version = match[1].trim();
-      const looksLikeVersion = /^\d+\.\d/.test(version);
-      if (!looksLikeVersion) {
-        return { version: null, error: `Rejected non-version string: ${version.slice(0, 80)}` };
+    function done(version, error) {
+      if (resolved) return;
+      resolved = true;
+      try { child.kill("SIGTERM"); } catch (_) {}
+      if (version) {
+        const looksLikeVersion = /^\d+\.\d/.test(version);
+        if (!looksLikeVersion) {
+          return resolve({ version: null, error: `Rejected non-version string: ${version.slice(0, 80)}` });
+        }
+        return resolve({ version, error: null });
       }
-      return { version, error: null };
+      return resolve({ version: null, error: error || null });
     }
 
-    if (result.error) {
-      return { version: null, error: result.error.message.slice(0, 200) };
-    }
+    // Scan each chunk of stdout/stderr for appNewVersion — kill immediately on match
+    child.stdout.on("data", (chunk) => {
+      stdoutBuf += chunk.toString();
+      const match = stdoutBuf.match(VERSION_RE);
+      if (match) done(match[1].trim(), null);
+    });
 
-    // Installomator ran but no version found — app may not have a version check
-    return { version: null, error: null };
-  } catch (err) {
-    return { version: null, error: err.message.slice(0, 200) };
-  }
+    child.stderr.on("data", (chunk) => {
+      stderrBuf += chunk.toString();
+      const match = stderrBuf.match(VERSION_RE);
+      if (match) done(match[1].trim(), null);
+    });
+
+    child.on("close", (code, signal) => {
+      if (resolved) return;
+      // Process ended without a version match
+      const combined = stdoutBuf + stderrBuf;
+      const match = combined.match(VERSION_RE);
+      if (match) return done(match[1].trim(), null);
+      if (code !== 0 && signal !== "SIGTERM") {
+        return done(null, `Command failed (exit ${code})`);
+      }
+      done(null, null);
+    });
+
+    child.on("error", (err) => done(null, err.message.slice(0, 200)));
+
+    // Hard timeout — if we haven't found a version in TIMEOUT_MS, give up
+    const timer = setTimeout(() => done(null, `Timeout after ${TIMEOUT_MS}ms`), TIMEOUT_MS);
+    // Don't let the timer keep the process alive
+    if (timer.unref) timer.unref();
+  });
 }
-
 /**
  * Run version checks for a batch of labels with a concurrency cap.
  * Returns { label: { version, error } } map.
@@ -110,7 +140,7 @@ async function checkVersionBatch(labels) {
     const chunk = labels.slice(i, i + MAX_CONCURRENT);
     await Promise.allSettled(
       chunk.map(async (label) => {
-        const result = checkLabelVersion(installomatorPath, label);
+        const result = await checkLabelVersion(installomatorPath, label);
         results[label] = result;
         if (result.version) {
           console.log(`[VersionChecker]   ${label}: ${result.version}`);
