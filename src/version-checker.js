@@ -69,7 +69,11 @@ function checkLabelVersion(installomatorPath, label) {
     let stdoutBuf = "";
     let stderrBuf = "";
 
-    const child = spawn(installomatorPath, [label, "NOTIFY=silent", "DEBUG=1"], {
+    const args = [label, "NOTIFY=silent", "DEBUG=1"];
+    if (process.env.GITHUB_TOKEN) {
+      args.push("GITHUB_TOKEN=" + process.env.GITHUB_TOKEN);
+    }
+    const child = spawn(installomatorPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
 

@@ -1,14 +1,22 @@
 /**
  * OrchardPatch Agent — Inventory Scheduler
- * Runs periodic inventory collection and caches results to disk.
- * Default interval: every 15 minutes.
+ * Phase 6: fast loop (60s) + slow loop (15min) architecture.
+ *
+ * Fast loop (60s): polls pending_patches AND pending_commands.
+ *   - Fires patches immediately (fire-and-forget); proc.on('close') in
+ *     patcher.js is the report path.
+ *   - Processes force check-in commands by calling runInventoryAndVersionCheck().
+ *
+ * Slow loop (15min): full inventory collection + version checks.
+ *   - runInventoryAndVersionCheck() is extracted so the fast loop can
+ *     invoke it on-demand for check_in commands.
  */
 
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { collectInventory } = require("./inventory");
-const { checkinToServer, fetchPendingPatches, claimPatch, reportPatchJob, saveDeviceId, loadDeviceId } = require("./checkin");
+const { checkinToServer, fetchPendingPatches, claimPatch, reportPatchJob, saveDeviceId, loadDeviceId, loadConfig } = require("./checkin");
 const { enrichAppsWithLabels, lookupLabel } = require("./catalog");
 const { runPatchJob } = require("./patcher");
 const { getOverride } = require("./overrides");
@@ -17,9 +25,9 @@ const { runVersionCheck } = require("./version-checker");
 const CACHE_DIR = path.join(process.env.HOME || "/var/root", ".orchardpatch");
 const CACHE_FILE = path.join(CACHE_DIR, "inventory-cache.json");
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-const POLL_INTERVAL_MS = 45 * 1000; // 45 seconds
+const FAST_LOOP_INTERVAL_MS = 60 * 1000;     // 60 seconds
 
-// Version check: run every N check-ins (configurable)
+// Version check: run every N slow-loop check-ins (configurable)
 const VERSION_CHECK_INTERVAL = parseInt(process.env.VERSION_CHECK_INTERVAL) || 10;
 let checkinCount = 0;
 
@@ -32,7 +40,7 @@ function ensureCacheDir() {
 function writeCache(inventory) {
   ensureCacheDir();
   fs.writeFileSync(CACHE_FILE, JSON.stringify(inventory, null, 2));
-  console.log(`[OrchardPatch Scheduler] Cache written: ${inventory.apps.length} apps`);
+  console.log("[OrchardPatch Scheduler] Cache written: " + inventory.apps.length + " apps");
 }
 
 function readCache() {
@@ -54,56 +62,52 @@ function getCacheAge() {
   return Infinity;
 }
 
+function getDeviceId() {
+  return loadDeviceId() || ("device-" + os.hostname());
+}
+
+// ─── Slow loop body ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run a full inventory collection + version check batch.
+ * Called by:
+ *   1. The slow loop timer (every 15min)
+ *   2. The fast loop when a check_in command is received
+ */
+async function runInventoryAndVersionCheck() {
+  console.log("[OrchardPatch Scheduler] Running inventory collection...");
+  const inventory = collectInventory();
+  inventory.apps = enrichAppsWithLabels(inventory.apps);
+  writeCache(inventory);
+
+  checkinToServer(inventory).catch(err =>
+    console.warn("[OrchardPatch Scheduler] Server check-in failed:", err.message)
+  );
+
+  checkinCount++;
+  if (checkinCount % VERSION_CHECK_INTERVAL === 0) {
+    console.log("[OrchardPatch Scheduler] Check-in #" + checkinCount + " — triggering version check batch");
+    runVersionCheck(inventory.apps).catch(err =>
+      console.warn("[OrchardPatch Scheduler] Version check failed:", err.message)
+    );
+  }
+
+  return inventory;
+}
+
+// Wrapper for the slow loop setInterval — catches errors so the interval keeps ticking
 async function runCollection() {
   try {
-    console.log("[OrchardPatch Scheduler] Running scheduled inventory collection...");
-    const inventory = collectInventory();
-    // Enrich with Installomator labels before caching and check-in
-    inventory.apps = enrichAppsWithLabels(inventory.apps);
-    writeCache(inventory);
-    // Report to central server if configured
-    checkinToServer(inventory).catch(err =>
-      console.warn("[OrchardPatch Scheduler] Server check-in failed:", err.message)
-    );
-
-    // Every N check-ins, run a version batch and ingest results to fleet server
-    // Fire-and-forget — does not block the check-in response
-    checkinCount++;
-    if (checkinCount % VERSION_CHECK_INTERVAL === 0) {
-      console.log(`[OrchardPatch Scheduler] Check-in #${checkinCount} — triggering version check batch`);
-      runVersionCheck(inventory.apps).catch(err =>
-        console.warn("[OrchardPatch Scheduler] Version check failed:", err.message)
-      );
-    }
-
-    return inventory;
+    return await runInventoryAndVersionCheck();
   } catch (err) {
     console.error("[OrchardPatch Scheduler] Collection failed:", err.message);
     return null;
   }
 }
 
-function getDeviceId() {
-  // Prefer the server-assigned ID (serial-based) persisted from the last checkin.
-  // Fall back to hostname-based guess only if we haven't checked in yet.
-  return loadDeviceId() || `device-${os.hostname()}`;
-}
+// ─── Fast loop helpers ──────────────────────────────────────────────────────────────────────────
 
-function waitForJob(job) {
-  return new Promise((resolve) => {
-    const check = setInterval(() => {
-      if (job.status === "success" || job.status === "failed") {
-        clearInterval(check);
-        resolve(job);
-      }
-    }, 2000);
-    // Timeout after 10 minutes
-    setTimeout(() => { clearInterval(check); resolve(job); }, 10 * 60 * 1000);
-  });
-}
-
-async function pollAndRunPatches() {
-  const deviceId = getDeviceId();
+async function fastLoopPatchPoll(deviceId) {
   let patches;
   try {
     patches = await fetchPendingPatches(deviceId);
@@ -113,14 +117,15 @@ async function pollAndRunPatches() {
   }
 
   if (!patches.length) return;
-
-  console.log(`[OrchardPatch Poller] Found ${patches.length} pending patch(es)`);
+  console.log("[OrchardPatch Poller] Found " + patches.length + " pending patch(es)");
 
   for (const patch of patches) {
     try {
       const claimed = await claimPatch(patch.id);
-      if (!claimed) {
-        console.log(`[OrchardPatch Poller] Could not claim patch ${patch.id} — skipping`);
+      if (claimed === null) {
+        // Zero rows returned from conditional UPDATE — race: another agent claimed it
+        // first, or it was cancelled between fetch and claim
+        console.log("[OrchardPatch Poller] Lost claim on patch " + patch.id + " — skipping");
         continue;
       }
 
@@ -134,45 +139,124 @@ async function pollAndRunPatches() {
       }
 
       if (!label) {
-        console.warn(`[OrchardPatch Poller] No label for "${appName}" (${bundleId || "no bundle ID"}) — skipping`);
+        console.warn("[OrchardPatch Poller] No label for \"" + appName + "\" (" + (bundleId || "no bundle ID") + ") — skipping");
         continue;
       }
 
-      console.log(`[OrchardPatch Poller] Running patch: ${appName} (${label}) mode=${mode || "managed"}`);
-      const job = await runPatchJob(label, appName, mode || "managed", deviceId, patch.id);
-
-      await waitForJob(job);
-
-      reportPatchJob(job).catch(err =>
-        console.warn("[OrchardPatch Poller] Failed to report patch job:", err.message)
+      console.log("[OrchardPatch Poller] Firing patch: " + appName + " (" + label + ") mode=" + (mode || "managed"));
+      // Fire and forget — proc.on('close') in patcher.js is the report path
+      runPatchJob(label, appName, mode || "managed", deviceId, patch.id).catch(err =>
+        console.error("[OrchardPatch Poller] runPatchJob error for " + patch.id + ":", err.message)
       );
     } catch (err) {
-      console.error(`[OrchardPatch Poller] Error processing patch ${patch.id}:`, err.message);
+      console.error("[OrchardPatch Poller] Error processing patch " + patch.id + ":", err.message);
     }
   }
 }
 
+async function fastLoopCommandPoll(deviceId) {
+  const config = loadConfig();
+  const serverUrl = (config.server && config.server.url) || process.env.ORCHARDPATCH_SERVER_URL;
+  const serverToken = (config.server && config.server.token) || process.env.ORCHARDPATCH_SERVER_TOKEN;
+  if (!serverUrl || !serverToken) return;
+
+  let commands;
+  try {
+    const res = await fetch(
+      serverUrl + "/pending-commands?device_id=" + encodeURIComponent(deviceId),
+      {
+        headers: { "x-orchardpatch-token": serverToken },
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    commands = data.commands || [];
+  } catch (err) {
+    console.warn("[OrchardPatch Commander] Failed to fetch pending commands:", err.message);
+    return;
+  }
+
+  if (!commands.length) return;
+  console.log("[OrchardPatch Commander] Found " + commands.length + " pending command(s)");
+
+  for (const cmd of commands) {
+    let result = "";
+    try {
+      // Claim the command — conditional UPDATE, 409 if already claimed
+      const claimRes = await fetch(serverUrl + "/pending-commands/" + cmd.id + "/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-orchardpatch-token": serverToken },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (claimRes.status === 409) {
+        console.log("[OrchardPatch Commander] Lost claim on command " + cmd.id + " — skipping");
+        continue;
+      }
+      if (!claimRes.ok) {
+        console.warn("[OrchardPatch Commander] Claim failed for command " + cmd.id + ": " + claimRes.status);
+        continue;
+      }
+
+      // Execute command
+      switch (cmd.command) {
+        case "check_in":
+          console.log("[OrchardPatch Commander] Executing force check-in (command " + cmd.id + ")");
+          try {
+            await runInventoryAndVersionCheck();
+          } catch (err) {
+            result = "check_in failed: " + err.message;
+            console.error("[OrchardPatch Commander] check_in error:", err.message);
+          }
+          break;
+        default:
+          console.log("[OrchardPatch Commander] Unknown command type: " + cmd.command);
+          result = "ignored: unknown command type";
+      }
+    } catch (err) {
+      result = "error: " + err.message;
+      console.error("[OrchardPatch Commander] Error processing command " + cmd.id + ":", err.message);
+    }
+
+    // Mark complete — idempotent, always fires even on error paths above
+    try {
+      await fetch(serverUrl + "/pending-commands/" + cmd.id + "/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-orchardpatch-token": serverToken },
+        body: JSON.stringify({ result }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (err) {
+      console.warn("[OrchardPatch Commander] Failed to mark command " + cmd.id + " complete:", err.message);
+    }
+  }
+}
+
+// ─── Scheduler entry point ──────────────────────────────────────────────────────────────────────
+
 function startScheduler(intervalMs = DEFAULT_INTERVAL_MS) {
-  console.log(`[OrchardPatch Scheduler] Started — interval: ${intervalMs / 60000} minutes`);
+  console.log("[OrchardPatch Scheduler] Started — slow loop: " + (intervalMs / 60000) + "min, fast loop: " + (FAST_LOOP_INTERVAL_MS / 1000) + "s");
 
-  // Run immediately on start
+  // Slow loop — full inventory + version checks every 15min
   runCollection();
-
-  // Then run on schedule
   setInterval(runCollection, intervalMs);
 
-  // Poll fleet server for pending patches
-  console.log(`[OrchardPatch Poller] Started — interval: ${POLL_INTERVAL_MS / 1000}s`);
-  // First poll after 15 seconds (let agent finish startup)
+  // Fast loop — patch poll + command poll every 60s
+  // First tick after 15s (let agent finish startup)
   setTimeout(() => {
-    pollAndRunPatches().catch(err =>
-      console.warn("[OrchardPatch Poller] Unhandled error:", err.message)
-    );
-    setInterval(() => {
-      pollAndRunPatches().catch(err =>
+    const deviceId = getDeviceId();
+
+    const runFastLoop = () => {
+      fastLoopPatchPoll(deviceId).catch(err =>
         console.warn("[OrchardPatch Poller] Unhandled error:", err.message)
       );
-    }, POLL_INTERVAL_MS);
+      fastLoopCommandPoll(deviceId).catch(err =>
+        console.warn("[OrchardPatch Commander] Unhandled error:", err.message)
+      );
+    };
+
+    runFastLoop();
+    setInterval(runFastLoop, FAST_LOOP_INTERVAL_MS);
   }, 15000);
 }
 

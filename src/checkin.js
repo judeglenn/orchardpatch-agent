@@ -156,7 +156,7 @@ async function claimPatch(patchId) {
   const serverUrl = config.server?.url || process.env.ORCHARDPATCH_SERVER_URL;
   const serverToken = config.server?.token || process.env.ORCHARDPATCH_SERVER_TOKEN;
 
-  if (!serverUrl || !serverToken) return false;
+  if (!serverUrl || !serverToken) return null;
 
   const res = await fetch(`${serverUrl}/pending-patches/${patchId}/claim`, {
     method: "POST",
@@ -167,7 +167,10 @@ async function claimPatch(patchId) {
     signal: AbortSignal.timeout(10000),
   });
 
-  return res.ok;
+  // 409 = already claimed or not found (conditional UPDATE returned 0 rows) — caller skips
+  // any other non-ok = transient error — also skip
+  if (!res.ok) return null;
+  return true;
 }
 
-module.exports = { checkinToServer, reportPatchJob, fetchPendingPatches, claimPatch, saveDeviceId, loadDeviceId };
+module.exports = { checkinToServer, reportPatchJob, fetchPendingPatches, claimPatch, saveDeviceId, loadDeviceId, loadConfig };
