@@ -129,12 +129,19 @@ function getInstalledApps() {
         if (!bundleId || seen.has(bundleId)) continue;
         seen.add(bundleId);
 
+        // Determine source: system > mas > user
+        let source = dir.startsWith("/System") || bundleId.startsWith("com.apple.") ? "system" : "user";
+        if (source !== "system") {
+          const masReceiptPath = path.join(appPath, "Contents", "_MASReceipt");
+          if (fs.existsSync(masReceiptPath)) source = "mas";
+        }
+
         apps.push({
           name,
           bundleId,
           version,
           path: appPath,
-          source: dir.startsWith("/System") || bundleId.startsWith("com.apple.") ? "system" : "user",
+          source,
           category,
         });
       } catch {
