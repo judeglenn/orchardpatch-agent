@@ -125,6 +125,7 @@ function getInstalledApps() {
         const version = getName("CFBundleShortVersionString") || getName("CFBundleVersion") || "unknown";
         const rawCategory = getName("LSApplicationCategoryType");
         const category = rawCategory ? (CATEGORY_MAP[rawCategory] ?? null) : null;
+        const sparkleFeedUrl = getName("SUFeedURL") || null;
 
         if (!bundleId || seen.has(bundleId)) continue;
         seen.add(bundleId);
@@ -143,6 +144,7 @@ function getInstalledApps() {
           path: appPath,
           source,
           category,
+          sparkleFeedUrl,
         });
       } catch {
         // Skip apps we can't read
