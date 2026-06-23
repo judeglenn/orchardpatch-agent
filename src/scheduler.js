@@ -66,6 +66,18 @@ function getDeviceId() {
   return loadDeviceId() || ("device-" + os.hostname());
 }
 
+// Inject config secrets into process.env so child-process spawns (e.g. Installomator)
+// inherit them without requiring plist EnvironmentVariables entries.
+// Called once at startup before any version checks run.
+function applyConfigEnv() {
+  const config = loadConfig();
+  const githubToken = config.githubToken || process.env.GITHUB_TOKEN;
+  if (githubToken) {
+    process.env.GITHUB_TOKEN = githubToken;
+    console.log("[OrchardPatch Scheduler] GITHUB_TOKEN loaded from config");
+  }
+}
+
 // ─── Slow loop body ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -236,6 +248,9 @@ async function fastLoopCommandPoll(deviceId) {
 
 function startScheduler(intervalMs = DEFAULT_INTERVAL_MS) {
   console.log("[OrchardPatch Scheduler] Started — slow loop: " + (intervalMs / 60000) + "min, fast loop: " + (FAST_LOOP_INTERVAL_MS / 1000) + "s");
+
+  // Inject config secrets (e.g. githubToken) into process.env at startup
+  applyConfigEnv();
 
   // Slow loop — full inventory + version checks every 15min
   runCollection();
