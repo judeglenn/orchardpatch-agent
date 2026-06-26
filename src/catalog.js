@@ -242,11 +242,15 @@ function lookupLabel(appName, bundleId) {
  * Enrich an array of installed apps with their Installomator labels
  */
 function enrichAppsWithLabels(apps) {
-  return apps.map(app => ({
-    ...app,
-    installomatorLabel: lookupLabel(app.name, app.bundleId) || null,
-    patchable: !!lookupLabel(app.name, app.bundleId),
-  }));
+  return apps.map(app => {
+    // MAS apps must never receive a derived label -- Installomator cannot patch them
+    if (app.source === 'mas') return { ...app, installomatorLabel: null, patchable: false };
+    return {
+      ...app,
+      installomatorLabel: lookupLabel(app.name, app.bundleId) || null,
+      patchable: !!lookupLabel(app.name, app.bundleId),
+    };
+  });
 }
 
 // Load catalog on module init — prefer cached file, fall back to bundled seed
