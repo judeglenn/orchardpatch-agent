@@ -95,7 +95,8 @@ function getInstalledApps() {
     let entries;
     try {
       entries = fs.readdirSync(dir);
-    } catch {
+    } catch (err) {
+      console.warn('[inventory] readdirSync failed for directory:', dir, err.message);
       continue;
     }
 
@@ -146,8 +147,8 @@ function getInstalledApps() {
           category,
           sparkleFeedUrl,
         });
-      } catch {
-        // Skip apps we can't read
+      } catch (err) {
+        console.warn('[inventory] skipping app entry:', entry, err.message);
         continue;
       }
     }
